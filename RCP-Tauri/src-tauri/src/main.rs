@@ -29,7 +29,7 @@ fn initialize_database() -> Result<Connection>{
 
 fn main() {
 
-    let db_conection = initialize_database().expect("Failed to initialize database");
+    let db_connection = initialize_database().expect("Failed to initialize database");
 
     tauri::Builder::default()
         .manage(AppState {
