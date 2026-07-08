@@ -23,7 +23,7 @@ fn initialize_database() -> Result<Connection>{
         )",
         [], // Empty parameters for this query
     )?;
-
+    
     Ok(conn)
 }
 
@@ -36,5 +36,5 @@ fn main() {
             db: Mutex::new(db_connection),
         })
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .expect("error while running tauri app");
 }
