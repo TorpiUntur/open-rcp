@@ -9,31 +9,25 @@ struct AppState{
     db: Mutex<Connection>,
 }
 
-fn initialize_database() -> Result<Connection>{
-    let conn = Connection::open("data.db")?;
 
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS time_log (
+fn main() {
+    tauri::Builder::default()
+        .setup(|app| {
+            let path = app.path_resolver().app_data_dir().expect("Failed to get path");
+            std::fs::create_dir_all(&path).expect("Failed to create app data dir");
+            
+            let conn = Connection::open(path.join("data.db")).expect("Failed to open DB");
+            conn.execute("CREATE TABLE IF NOT EXISTS time_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL,
             time_in TEXT NOT NULL,
             time_out TEXT,
             duration_minutes INTEGER,
             is_break BOOLEAN DEFAULT 0
-        )",
-        [], // Empty parameters for this query
-    )?;
-    
-    Ok(conn)
-}
-
-fn main() {
-
-    let db_connection = initialize_database().expect("Failed to initialize database");
-
-    tauri::Builder::default()
-        .manage(AppState {
-            db: Mutex::new(db_connection),
+        )", []).expect("Table init failed");
+            
+            app.manage(AppState { db: Mutex::new(conn) });
+            Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri app");
