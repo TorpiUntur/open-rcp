@@ -20,6 +20,7 @@ fn initialize_database(app_handle: &tauri::AppHandle) -> Result<Connection, Box<
     let db_path = app_dir.join("data.db");
     let conn = Connection::open(db_path)?;
 
+    // Tworzymy tabelę z kolumną event_type
     conn.execute(
         "CREATE TABLE IF NOT EXISTS time_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,7 +28,7 @@ fn initialize_database(app_handle: &tauri::AppHandle) -> Result<Connection, Box<
             time_in TEXT NOT NULL,
             time_out TEXT,
             duration_minutes INTEGER,
-            is_break BOOLEAN DEFAULT 0
+            event_type TEXT DEFAULT 'work'
         )",
         [],
     )?;
@@ -48,6 +49,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::clock_in,
             commands::clock_out,
+            commands::return_to_work,
             commands::get_logs
         ])
         .run(tauri::generate_context!())

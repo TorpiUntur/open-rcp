@@ -8,38 +8,39 @@
 </head>
 <body>
   <main class="container">
-    <h1>Time Tracker</h1>
+  <h1>Time Tracker</h1>
 
-    <!-- Panel sterowania zdarzeniami -->
-    <div class="controls-grid">
-      <button id="btn-start" class="btn-green">Start Pracy</button>
-      <button id="btn-stop" class="btn-red">Stop Pracy</button>
-      <button id="btn-break" class="btn-orange">Przerwa / Prywatne</button>
-    </div>
+  <!-- Panel Przycisków -->
+  <div class="controls-grid">
+    <button id="btn-start" class="btn-green">Start Pracy</button>
+    <button id="btn-stop" class="btn-red">Stop Pracy</button>
+    
+    <!-- Przyciski wyjść (znikają podczas wyjścia) -->
+    <button id="btn-private" class="btn-orange">Wyjście Prywatne</button>
+    <button id="btn-business" class="btn-blue">Wyjście Służbowe</button>
 
-    <!-- Pasek statusu / Komunikaty -->
-    <p id="status-msg">Gotowy do rejestracji czasu.</p>
+    <!-- Przycisk powrotu (pojawia się TYLKO podczas wyjścia) -->
+    <button id="btn-return" class="btn-green" style="display: none;">POWRÓT Z WYJŚCIA</button>
+  </div>
 
-    <hr />
+  <p id="status-msg">Gotowy do rejestracji czasu.</p>
+  <hr />
 
-    <!-- Tabela zdarzeń z bazy -->
-    <h2>Historia rejestracji</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Data</th>
-          <th>Wejście</th>
-          <th>Wyjście</th>
-          <th>Czas (min)</th>
-          <th>Typ</th>
-        </tr>
-      </thead>
-      <tbody id="logs-table-body">
-        <!-- JavaScript wstrzyknie tu wiersze z bazy -->
-      </tbody>
-    </table>
-  </main>
+  <h2>Historia sesji</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Data</th>
+        <th>Start</th>
+        <th>Stop</th>
+        <th>Czas</th>
+        <th>Typ zdarzenia</th>
+      </tr>
+    </thead>
+    <tbody id="logs-table-body"></tbody>
+  </table>
+</main>
 
   <script type="module" src="./main.js"></script>
 </body>
