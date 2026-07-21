@@ -7,40 +7,65 @@
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <main class="container">
-  <h1>Time Tracker</h1>
 
-  <!-- Panel Przycisków -->
-  <div class="controls-grid">
-    <button id="btn-start" class="btn-green">Start Pracy</button>
-    <button id="btn-stop" class="btn-red">Stop Pracy</button>
-    
-    <!-- Przyciski wyjść (znikają podczas wyjścia) -->
-    <button id="btn-private" class="btn-orange">Wyjście Prywatne</button>
-    <button id="btn-business" class="btn-blue">Wyjście Służbowe</button>
+  <!-- 1. EKRAN LOGOWANIA -->
+  <main id="login-screen" class="container">
+    <h1>Logowanie</h1>
+    <form id="login-form">
+      <div class="field">
+        <label>Login:</label>
+        <input type="text" id="username" required placeholder="np. admin" />
+      </div>
+      <div class="field">
+        <label>Hasło:</label>
+        <input type="password" id="password" required placeholder="••••••••" />
+      </div>
+      <div class="field-checkbox">
+        <input type="checkbox" id="remember-me" checked />
+        <label for="remember-me">Zapamiętaj mnie (Autologowanie)</label>
+      </div>
+      <button type="submit" class="btn-green" style="width: 100%; margin-top: 10px;">Zaloguj się</button>
+    </form>
+    <p id="login-error" style="color: #f38ba8; text-align: center;"></p>
+  </main>
 
-    <!-- Przycisk powrotu (pojawia się TYLKO podczas wyjścia) -->
-    <button id="btn-return" class="btn-green" style="display: none;">POWRÓT Z WYJŚCIA</button>
-  </div>
+  <!-- 2. GŁÓWNY EKRAN APLIKACJI (Ukryty przed zalogowaniem) -->
+  <main id="app-screen" class="container" style="display: none;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <h1>Time Tracker</h1>
+      <div>
+        <span id="user-info" style="margin-right: 15px; font-weight: bold;"></span>
+        <button id="btn-logout" style="padding: 5px 10px; background: #f38ba8; color: #11111b;">Wyloguj</button>
+      </div>
+    </div>
 
-  <p id="status-msg">Gotowy do rejestracji czasu.</p>
-  <hr />
+    <!-- Panel Sterowania RCP -->
+    <div class="controls-grid">
+      <button id="btn-start" class="btn-green">Start Pracy</button>
+      <button id="btn-stop" class="btn-red">Stop Pracy</button>
+      <button id="btn-private" class="btn-orange">Wyjście Prywatne</button>
+      <button id="btn-business" class="btn-blue">Wyjście Służbowe</button>
+      <button id="btn-return" class="btn-green" style="display: none;">POWRÓT Z WYJŚCIA</button>
+    </div>
 
-  <h2>Historia sesji</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Data</th>
-        <th>Start</th>
-        <th>Stop</th>
-        <th>Czas</th>
-        <th>Typ zdarzenia</th>
-      </tr>
-    </thead>
-    <tbody id="logs-table-body"></tbody>
-  </table>
-</main>
+    <p id="status-msg">Gotowy do rejestracji czasu.</p>
+    <hr />
+
+    <h2>Historia rejestracji</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Data</th>
+          <th>Start</th>
+          <th>Stop</th>
+          <th>Czas</th>
+          <th>Typ zdarzenia</th>
+        </tr>
+      </thead>
+      <tbody id="logs-table-body"></tbody>
+    </table>
+  </main>
 
   <script type="module" src="./main.js"></script>
 </body>
