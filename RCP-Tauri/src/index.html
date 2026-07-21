@@ -77,38 +77,74 @@
       </div>
     </section>
 
-    <!-- WIDOK 2: PODSUMOWANIE MIESIĘCZNE & EDYCJA -->
-    <section id="view-reports" style="display: none;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-        <h2>Historia Wpisów i Edycja</h2>
-        <button id="btn-add-manual" style="padding: 8px 15px; background: #a6e3a1; color: #11111b; font-weight: bold; border: none; border-radius: 4px; cursor: pointer;">+ Dodaj Zapomniany Wpis</button>
+   <!-- WIDOK 2: PODSUMOWANIE MIESIĘCZNE & WYKRESY -->
+<section id="view-reports" style="display: none;">
+  
+  <!-- Pasek filtrowania -->
+  <div class="card" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding: 12px 20px; flex-wrap: wrap; gap: 10px;">
+    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+      
+      <!-- Selekcja Pracownika (widoczna tylko dla Admina) -->
+      <div id="admin-user-select-container" style="display: none;">
+        <label style="font-weight: bold; margin-right: 5px;">Pracownik:</label>
+        <select id="select-user" style="padding: 6px 10px; font-weight: bold; color: var(--accent-blue);"></select>
       </div>
 
-      <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
-        <button id="btn-export-csv" style="padding: 8px 15px; background: #89b4fa; color: #11111b; font-weight: bold; border: none; border-radius: 4px; cursor: pointer;">Eksportuj do CSV</button>
-
-        <label for="input-import-csv" style="padding: 8px 15px; background: #cba6f7; color: #11111b; font-weight: bold; border-radius: 4px; cursor: pointer;">Importuj z CSV</label>
-        <input type="file" id="input-import-csv" accept=".csv" style="display: none;" />
-
-        <span id="csv-msg" style="margin-left: 10px;"></span>
+      <div>
+        <label style="font-weight: bold; margin-right: 5px;">Okres:</label>
+        <select id="select-month" style="padding: 6px 10px;">
+          <option value="1">Styczeń</option>
+          <option value="2">Luty</option>
+          <option value="3">Marzec</option>
+          <option value="4">Kwiecień</option>
+          <option value="5">Maj</option>
+          <option value="6">Czerwiec</option>
+          <option value="7">Lipiec</option>
+          <option value="8">Sierpień</option>
+          <option value="9">Wrzesień</option>
+          <option value="10">Październik</option>
+          <option value="11">Listopad</option>
+          <option value="12">Grudzień</option>
+        </select>
+        <select id="select-year" style="padding: 6px 10px;"></select>
       </div>
+    </div>
 
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Data</th>
-            <th>Start</th>
-            <th>Stop</th>
-            <th>Czas</th>
-            <th>Typ</th>
-            <th>Akcje</th>
-          </tr>
-        </thead>
-        <tbody id="logs-table-body"></tbody>
-      </table>
-    </section>
+    <div style="display: flex; gap: 10px;">
+      <button id="btn-export-csv" style="padding: 6px 12px; background: #89b4fa; color: #11111b;">Eksportuj CSV</button>
+      <label for="input-import-csv" style="padding: 6px 12px; background: #cba6f7; color: #11111b; font-weight: bold; border-radius: 6px; cursor: pointer;">Importuj CSV</label>
+      <input type="file" id="input-import-csv" accept=".csv" style="display: none;" />
+      <button id="btn-add-manual" style="padding: 6px 12px; background: #a6e3a1; color: #11111b;">+ Dodaj Wpis</button>
+    </div>
+  </div>
 
+  <p id="csv-msg" style="text-align: right; margin-top: -10px; margin-bottom: 10px;"></p>
+
+  <!-- SEKCJA WYKRESU PRZEPRACOWANYCH GODZIN -->
+  <div class="card" style="margin-bottom: 20px;">
+    <h3 style="margin-bottom: 15px;">Wykres Przepracowanych Godzin w Miesiącu</h3>
+    <div id="chart-container" style="display: flex; align-items: flex-end; gap: 6px; height: 160px; padding-top: 20px; border-bottom: 1px solid var(--border-color); overflow-x: auto;"></div>
+  </div>
+
+  <!-- TABELA Z HARMONOGRAMEM -->
+  <h3>Historia Wpisów</h3>
+  <div style="overflow-x: auto; border-radius: 8px;">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Data</th>
+          <th>Start</th>
+          <th>Stop</th>
+          <th>Czas pracy</th>
+          <th>Typ</th>
+          <th>Akcje</th>
+        </tr>
+      </thead>
+      <tbody id="logs-table-body"></tbody>
+    </table>
+  </div>
+</section>
     <!-- WIDOK 3: USTAWIENIA & ZARZĄDZANIE UŻYTKOWNIKAMI -->
     <section id="view-settings" style="display: none;">
       <h2>Ustawienia Aplikacji</h2>

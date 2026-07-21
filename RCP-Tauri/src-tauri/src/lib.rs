@@ -44,7 +44,8 @@ pub fn run() {
             commands::get_absences,
             commands::delete_absence,
             commands::import_csv_data,
-            commands::export_csv_data
+            commands::export_csv_data,
+            commands::get_all_users
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

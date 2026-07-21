@@ -207,24 +207,28 @@ fn clock_out_internal(db: &rusqlite::Connection, user_id: i32, date: &str, now: 
     }
 }
 
+// ZMIANA: Pobieranie logów przefiltrowanych po Roku i Miesiącu (np. year = 2026, month = 7)
 #[tauri::command]
-pub fn get_logs(user_id: i32, state: tauri::State<AppState>) -> Result<Vec<TimeLog>, String> {
+pub fn get_logs(user_id: i32, year: i32, month: i32, state: tauri::State<AppState>) -> Result<Vec<TimeLog>, String> {
     let db = state.db.lock().map_err(|_| "Błąd blokady bazy danych")?;
     
-    // ZMIANA: Pobieramy duration_seconds zamiast duration_minutes
+    let month_pattern = format!("{:04}-{:02}-%", year, month);
+
     let mut stmt = db.prepare(
         "SELECT id, user_id, date, time_in, time_out, duration_seconds, event_type 
-         FROM time_log WHERE user_id = ? ORDER BY id DESC"
+         FROM time_log 
+         WHERE user_id = ? AND date LIKE ? 
+         ORDER BY date DESC, time_in DESC"
     ).map_err(|e| e.to_string())?;
 
-    let logs = stmt.query_map([user_id], |row| {
+    let logs = stmt.query_map(rusqlite::params![user_id, month_pattern], |row| {
         Ok(TimeLog {
             id: row.get(0)?,
             user_id: row.get(1)?,
             date: row.get(2)?,
             time_in: row.get(3)?,
             time_out: row.get(4)?,
-            duration_seconds: row.get(5)?, // Przypisujemy prawidłowo sekundy
+            duration_seconds: row.get(5)?,
             event_type: row.get(6)?,
         })
     }).map_err(|e| e.to_string())?
@@ -234,27 +238,28 @@ pub fn get_logs(user_id: i32, state: tauri::State<AppState>) -> Result<Vec<TimeL
     Ok(logs)
 }
 
+// ZMIANA: Statystyki liczone PRECYZYJNIE dla wybranego miesiąca i roku
 #[tauri::command]
-pub fn get_dashboard_stats(user_id: i32, state: tauri::State<AppState>) -> Result<DashboardStats, String> {
+pub fn get_dashboard_stats(user_id: i32, year: i32, month: i32, state: tauri::State<AppState>) -> Result<DashboardStats, String> {
     let db = state.db.lock().map_err(|_| "Błąd bazy")?;
     let today = crate::time_calc::current_date();
-    let month_start = crate::time_calc::current_month_start();
 
-    // 1. Norma dzienna w SEKUNDACH (domyślnie 8h = 28800 s)
+    let target_month_pattern = format!("{:04}-{:02}-%", year, month);
+
+    // 1. Norma dzienna w sekundach (np. 8h = 28800 s)
     let daily_target_seconds: i64 = db.query_row(
         "SELECT value FROM settings WHERE key = 'daily_target_seconds'",
         [],
         |r| r.get::<_, String>(0),
     ).unwrap_or_else(|_| "28800".to_string()).parse().unwrap_or(28800);
 
-    // 2. Pierwsze wejście dzisiaj
+    // 2. Pierwsze wejście dzisiaj i przerwy prywatne dzisiaj
     let today_first_in: Option<String> = db.query_row(
         "SELECT time_in FROM time_log WHERE user_id = ? AND date = ? ORDER BY id ASC LIMIT 1",
         rusqlite::params![user_id, today],
         |r| r.get(0),
     ).ok();
 
-    // 3. Łączny czas przerw prywatnych dzisiaj (w sekundach)
     let today_private_break_seconds: i64 = db.query_row(
         "SELECT COALESCE(SUM(duration_seconds), 0) FROM time_log 
          WHERE user_id = ? AND date = ? AND event_type = 'break_private'",
@@ -262,38 +267,34 @@ pub fn get_dashboard_stats(user_id: i32, state: tauri::State<AppState>) -> Resul
         |r| r.get(0),
     ).unwrap_or(0);
 
-    // 4. Saldo ze WSZYSTKICH DNI bieżącego miesiąca (włącznie z dzisiaj)
+    // 3. LICZENIE SALDA DLA KAŻDEGO DNIA Z AKTYWNOŚCIĄ W WYBRANYM MIESIĄCU
+    // Pobieramy sumę sekund przepracowanych w poszczególne dni
     let mut stmt = db.prepare(
         "SELECT date, SUM(duration_seconds) FROM time_log 
-         WHERE user_id = ? AND date >= ? AND date <= ? AND event_type IN ('work', 'business') AND duration_seconds IS NOT NULL
+         WHERE user_id = ? AND date LIKE ? AND date <= ? AND event_type IN ('work', 'business') AND duration_seconds IS NOT NULL
          GROUP BY date"
     ).map_err(|e| e.to_string())?;
 
-    let daily_totals = stmt.query_map(rusqlite::params![user_id, month_start, today], |row| {
+    let daily_totals = stmt.query_map(rusqlite::params![user_id, target_month_pattern, today], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
     }).map_err(|e| e.to_string())?;
 
-    let mut previous_days_balance_seconds: i64 = 0;
+    let mut monthly_balance_seconds: i64 = 0;
+
+    // Dla każdego dnia, w którym pracownik PRZYSZEDŁ DO PRACY:
+    // Bilans dnia = (Przepracowany czas) - (Norma dzienna)
     for day in daily_totals.filter_map(|r| r.ok()) {
-        previous_days_balance_seconds += day.1 - daily_target_seconds;
+        monthly_balance_seconds += day.1 - daily_target_seconds;
     }
 
-    // 5. DODATKOWO: Dni absencji w tym miesiącu (Urlop / L4) zerują minus dla danego dnia!
-    let absence_count: i64 = db.query_row(
-        "SELECT COUNT(*) FROM absence_log WHERE user_id = ? AND date >= ? AND date <= ?",
-        rusqlite::params![user_id, month_start, today],
-        |r| r.get(0),
-    ).unwrap_or(0);
+    // Urlop / L4 nie modyfikują salda (są ewidencyjne - 8h przyznane, 8h rozliczone = 0h)
 
-    // Za każdy dzień absencji doliczamy brakujące godziny do bilansu
-    previous_days_balance_seconds += absence_count * daily_target_seconds;
-
-    // 6. Godzina wyjścia na zero
+    // 4. Wyliczenie godziny wyjścia "Na Zero"
     let target_leave_time = if let Some(ref first_in) = today_first_in {
         crate::time_calc::calculate_target_leave_time(
             first_in,
             daily_target_seconds,
-            previous_days_balance_seconds,
+            monthly_balance_seconds,
             today_private_break_seconds,
         )
     } else {
@@ -303,12 +304,11 @@ pub fn get_dashboard_stats(user_id: i32, state: tauri::State<AppState>) -> Resul
     Ok(DashboardStats {
         today_first_in,
         target_leave_time,
-        monthly_balance_seconds: previous_days_balance_seconds,
+        monthly_balance_seconds,
         today_private_break_seconds,
         daily_target_seconds,
     })
 }
-
 // ==========================================
 // 3. EDYCJA RETROAKTYWNA I RAPORTY (KROK 4)
 // ==========================================
@@ -584,4 +584,24 @@ pub fn export_csv_data(user_id: i32, state: tauri::State<AppState>) -> Result<St
     }
 
     Ok(csv_lines.join("\n"))
+}
+
+#[tauri::command]
+pub fn get_all_users(state: tauri::State<AppState>) -> Result<Vec<User>, String> {
+    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+
+    let mut stmt = db.prepare("SELECT id, username, role FROM users ORDER BY username ASC")
+        .map_err(|e| e.to_string())?;
+
+    let users = stmt.query_map([], |row| {
+        Ok(User {
+            id: row.get(0)?,
+            username: row.get(1)?,
+            role: row.get(2)?,
+        })
+    }).map_err(|e| e.to_string())?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    Ok(users)
 }

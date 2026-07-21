@@ -64,6 +64,20 @@ const absenceType = document.getElementById('absence-type');
 const absenceMsg = document.getElementById('absence-msg');
 const absencesTableBody = document.getElementById('absences-table-body');
 
+// Zmienne do filtrowania daty
+let selectedYear = new Date().getFullYear();
+let selectedMonth = new Date().getMonth() + 1; // 1 - 12
+
+let targetUserId = null; // ID użytkownika, którego dane są aktualnie podglądane
+
+const adminUserSelectContainer = document.getElementById('admin-user-select-container');
+const selectUser = document.getElementById('select-user');
+
+// Elementy selectów
+const selectMonth = document.getElementById('select-month');
+const selectYear = document.getElementById('select-year');
+const chartContainer = document.getElementById('chart-container');
+
 let currentUser = null;
 
 const eventLabels = {
@@ -109,6 +123,9 @@ function showAppScreen() {
     adminUserPanel.style.display = 'none';
   }
 
+  targetUserId = currentUser.id;
+  initDateSelectors();
+  loadUsersForAdmin();
   switchTab('dashboard');
 }
 
@@ -174,9 +191,15 @@ function formatSeconds(totalSeconds, includeSign = true) {
 // 5. Odświeżanie Dashboardu i Tabeli Logów
 async function updateUI() {
   if (!currentUser) return;
+  const activeUserId = targetUserId || currentUser.id;
 
   try {
-    const stats = await invoke('get_dashboard_stats', { userId: currentUser.id });
+    // 1. Statystyki Dashboardu
+    const stats = await invoke('get_dashboard_stats', { 
+      userId: activeUserId,
+      year: selectedYear,
+      month: selectedMonth
+    });
 
     document.getElementById('stat-first-in').textContent = stats.today_first_in 
       ? (stats.today_first_in.split(' ')[1] || stats.today_first_in) 
@@ -190,7 +213,12 @@ async function updateUI() {
 
     document.getElementById('stat-break').textContent = formatSeconds(stats.today_private_break_seconds, false);
 
-    const logs = await invoke('get_logs', { userId: currentUser.id });
+    // 2. Pobieranie logów z wybranego miesiąca dla wybranego użytkownika
+    const logs = await invoke('get_logs', { 
+      userId: activeUserId,
+      year: selectedYear,
+      month: selectedMonth
+    });
     
     tableBody.innerHTML = logs.map(log => `
       <tr class="row-${log.event_type}">
@@ -201,13 +229,17 @@ async function updateUI() {
         <td>${log.duration_seconds !== null ? formatSeconds(log.duration_seconds, false) : '---'}</td>
         <td><b>${eventLabels[log.event_type] || log.event_type}</b></td>
         <td>
-          <button onclick="openEditModal(${log.id}, '${log.date}', '${log.time_in}', '${log.time_out || ''}', '${log.event_type}')" style="padding: 2px 6px; background: #89b4fa; color: #11111b; border: none; border-radius: 3px; cursor: pointer;">Edytuj</button>
-          <button onclick="deleteLogEntry(${log.id})" style="padding: 2px 6px; background: #f38ba8; color: #11111b; border: none; border-radius: 3px; cursor: pointer;">Usuń</button>
+          <button onclick="openEditModal(${log.id}, '${log.date}', '${log.time_in}', '${log.time_out || ''}', '${log.event_type}')" style="padding: 2px 6px; background: #89b4fa; color: #11111b;">Edytuj</button>
+          <button onclick="deleteLogEntry(${log.id})" style="padding: 2px 6px; background: #f38ba8; color: #11111b;">Usuń</button>
         </td>
       </tr>
     `).join('');
 
-    const activeLog = logs.length > 0 && !logs[0].time_out ? logs[0] : null;
+    renderChart(logs);
+
+    // Przyciskami RCP steruje tylko aktualnie zalogowany użytkownik na swoje konto
+    const ownLogs = activeUserId === currentUser.id ? logs : await invoke('get_logs', { userId: currentUser.id, year: selectedYear, month: selectedMonth });
+    const activeLog = ownLogs.length > 0 && !ownLogs[0].time_out ? ownLogs[0] : null;
 
     if (!activeLog) {
       btnStart.disabled = false;
@@ -236,7 +268,6 @@ async function updateUI() {
     console.error("Błąd UI:", err);
   }
 }
-
 // 6. Obsługa Urlopów i Nieobecności
 async function loadAbsences() {
   if (!currentUser) return;
@@ -293,6 +324,74 @@ window.deleteAbsenceEntry = async (id) => {
     } catch (e) { alert(e); }
   }
 };
+
+// Inicjalizacja opcji lat (np. od 2024 do 2030)
+function initDateSelectors() {
+  selectYear.innerHTML = '';
+  for (let y = 2024; y <= 2030; y++) {
+    const opt = document.createElement('option');
+    opt.value = y;
+    opt.textContent = y;
+    if (y === selectedYear) opt.selected = true;
+    selectYear.appendChild(opt);
+  }
+  selectMonth.value = selectedMonth;
+}
+
+selectMonth.addEventListener('change', (e) => {
+  selectedMonth = parseInt(e.target.value);
+  updateUI();
+});
+
+selectYear.addEventListener('change', (e) => {
+  selectedYear = parseInt(e.target.value);
+  updateUI();
+});
+
+// Funkcja renderująca wykres słupkowy w CSS/HTML
+function renderChart(logs) {
+  if (!chartContainer) return;
+  chartContainer.innerHTML = '';
+
+  // Agregacja sekund pracy per dzień miesiąca
+  const dailySeconds = {};
+  logs.forEach(log => {
+    if ((log.event_type === 'work' || log.event_type === 'business') && log.duration_seconds) {
+      dailySeconds[log.date] = (dailySeconds[log.date] || 0) + log.duration_seconds;
+    }
+  });
+
+  const dates = Object.keys(dailySeconds).sort();
+  if (dates.length === 0) {
+    chartContainer.innerHTML = '<p style="color: var(--text-dim); margin: auto;">Brak danych do wyświetlenia wykresu dla tego miesiąca.</p>';
+    return;
+  }
+
+  // Generowanie słupków
+  dates.forEach(date => {
+    const totalSec = dailySeconds[date];
+    const hours = totalSec / 3600;
+    // Wysokość słupka (norma 8h = 100px wysokości)
+    const heightPx = Math.min(Math.round((hours / 8) * 100), 140);
+    const dayNum = date.split('-')[2];
+
+    const barWrapper = document.createElement('div');
+    barWrapper.style.display = 'flex';
+    barWrapper.style.flexDirection = 'column';
+    barWrapper.style.alignItems = 'center';
+    barWrapper.style.flex = '1';
+    barWrapper.style.minWidth = '24px';
+    barWrapper.title = `${date}: ${formatSeconds(totalSec, false)}`;
+
+    barWrapper.innerHTML = `
+      <span style="font-size: 0.7em; color: var(--text-sub); margin-bottom: 4px;">${hours.toFixed(1)}h</span>
+      <div style="width: 100%; max-width: 20px; height: ${heightPx}px; background: ${hours >= 8 ? 'var(--accent-green)' : 'var(--accent-blue)'}; border-radius: 4px 4px 0 0;"></div>
+      <span style="font-size: 0.75em; font-weight: bold; margin-top: 4px;">${dayNum}</span>
+    `;
+
+    chartContainer.appendChild(barWrapper);
+  });
+}
 
 // 7. Obsługa Ustawień
 async function loadSettings() {
@@ -481,6 +580,38 @@ document.getElementById('input-import-csv').addEventListener('change', (e) => {
     }
   };
   reader.readAsText(file);
+});
+
+async function loadUsersForAdmin() {
+  if (currentUser.role !== 'admin') {
+    adminUserSelectContainer.style.display = 'none';
+    targetUserId = currentUser.id;
+    return;
+  }
+
+  try {
+    adminUserSelectContainer.style.display = 'block';
+    const users = await invoke('get_all_users');
+    selectUser.innerHTML = '';
+
+    users.forEach(u => {
+      const opt = document.createElement('option');
+      opt.value = u.id;
+      opt.textContent = `${u.username} (${u.role})`;
+      if (u.id === currentUser.id) opt.selected = true;
+      selectUser.appendChild(opt);
+    });
+
+    targetUserId = parseInt(selectUser.value) || currentUser.id;
+  } catch (err) {
+    console.error("Błąd pobierania użytkowników:", err);
+  }
+}
+
+// Reakcja na zmianę wybranego pracownika w liście
+selectUser.addEventListener('change', (e) => {
+  targetUserId = parseInt(e.target.value);
+  updateUI();
 });
 
 // Start
