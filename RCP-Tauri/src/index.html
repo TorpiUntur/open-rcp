@@ -1,26 +1,46 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Time Tracker RCP</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
 <body>
   <main class="container">
-    <table border="1">
+    <h1>Time Tracker</h1>
+
+    <!-- Panel sterowania zdarzeniami -->
+    <div class="controls-grid">
+      <button id="btn-start" class="btn-green">Start Pracy</button>
+      <button id="btn-stop" class="btn-red">Stop Pracy</button>
+      <button id="btn-break" class="btn-orange">Przerwa / Prywatne</button>
+    </div>
+
+    <!-- Pasek statusu / Komunikaty -->
+    <p id="status-msg">Gotowy do rejestracji czasu.</p>
+
+    <hr />
+
+    <!-- Tabela zdarzeń z bazy -->
+    <h2>Historia rejestracji</h2>
+    <table>
       <thead>
         <tr>
           <th>ID</th>
           <th>Data</th>
-          <th>Czas wejścia</th>
+          <th>Wejście</th>
+          <th>Wyjście</th>
+          <th>Czas (min)</th>
+          <th>Typ</th>
         </tr>
       </thead>
       <tbody id="logs-table-body">
-        <!-- Tutaj JavaScript wstawi wiersze z bazy -->
+        <!-- JavaScript wstrzyknie tu wiersze z bazy -->
       </tbody>
     </table>
-    <h1>Time Tracker</h1>
-
-    <div class="row">
-      <input type="text" id="date-input" placeholder="YYYY-MM-DD" />
-      <button id="save-btn">Save Log</button>
-    </div>
-
-    <p id="status-msg"></p>
   </main>
 
   <script type="module" src="./main.js"></script>
 </body>
+</html>

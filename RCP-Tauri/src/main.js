@@ -1,59 +1,61 @@
 const { invoke } = window.__TAURI__.core;
 
-console.log("main.js załadowany poprawnie!");
-
-const saveBtn = document.getElementById('save-btn');
-const dateInput = document.getElementById('date-input');
+const btnStart = document.getElementById('btn-start');
+const btnStop = document.getElementById('btn-stop');
+const btnBreak = document.getElementById('btn-break');
 const statusMsg = document.getElementById('status-msg');
+const tableBody = document.getElementById('logs-table-body');
 
-async function logTime(){
-  await invoke('add_log', { date: '2026-07-09'})
-}
-
-document.getElementById('save-btn').addEventListener('click', () => {
-    console.log("Przycisk został wykryty!");
-});
-
-saveBtn.addEventListener('click', async (event) => {
-  event.preventDefault(); // Zapobiega przeładowaniu strony przez przeglądarkę
-  
-  const dateValue = dateInput.value || "2026-07-21";
-  console.log("Wysyłam do Rust date:", dateValue);
-
-  try {
-    const response = await invoke('add_log', { date: dateValue });
-    console.log("Odpowiedź z Rust:", response);
-    await renderLogs();
-    statusMsg.textContent = "Zapisano w bazie: " + dateValue;
-  } catch (err) {
-    console.error("Błąd wywołania IPC:", err);
-    statusMsg.textContent = "Błąd: " + err;
-  }
-});
-
-async function handleAddLog(){
-  try{
-    const response = await invoke('add_log', { date: "2026-07-09"});
-    console.log(response);
-    alert("log saved successfully");
-  }catch(err){
-    console.error("Database error:", err);
-  }
-}
-
+// 1. Funkcja odświeżająca tabelę
 async function renderLogs() {
-  const tableBody = document.getElementById('logs-table-body');
   try {
     const logs = await invoke('get_logs');
+    
     tableBody.innerHTML = logs.map(log => `
-      <tr>
+      <tr class="${log.is_break ? 'row-break' : ''}">
         <td>${log.id}</td>
         <td>${log.date}</td>
-        <td>${log.time_in}</td>
+        <td>${log.time_in.split(' ')[1] || log.time_in}</td>
+        <td>${log.time_out ? (log.time_out.split(' ')[1] || log.time_out) : '---'}</td>
+        <td>${log.duration_minutes !== null ? log.duration_minutes + ' min' : 'W trakcie...'}</td>
+        <td>${log.is_break ? 'Przerwa' : 'Praca'}</td>
       </tr>
     `).join('');
   } catch (err) {
     console.error("Błąd pobierania danych:", err);
   }
 }
+
+// 2. Obsługa przycisków
+btnStart.addEventListener('click', async () => {
+  try {
+    const msg = await invoke('clock_in', { eventType: 'work' });
+    statusMsg.textContent = msg;
+    await renderLogs();
+  } catch (err) {
+    statusMsg.textContent = "Błąd: " + err;
+  }
+});
+
+btnBreak.addEventListener('click', async () => {
+  try {
+    const msg = await invoke('clock_in', { eventType: 'break' });
+    statusMsg.textContent = msg;
+    await renderLogs();
+  } catch (err) {
+    statusMsg.textContent = "Błąd: " + err;
+  }
+});
+
+btnStop.addEventListener('click', async () => {
+  try {
+    const msg = await invoke('clock_out');
+    statusMsg.textContent = msg;
+    await renderLogs();
+  } catch (err) {
+    statusMsg.textContent = "Błąd: " + err;
+  }
+});
+
+// Pierwsze załadowanie tabeli na starcie aplikacji
 renderLogs();
