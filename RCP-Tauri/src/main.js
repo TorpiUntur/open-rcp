@@ -249,12 +249,11 @@ async function updateUI() {
   const activeUserId = targetUserId || currentUser.id;
 
   try {
-    // 1. Statystyki Dashboardu
-    const stats = await invoke('get_dashboard_stats', { 
-      userId: activeUserId,
-      year: selectedYear,
-      month: selectedMonth
-    });
+  const stats = await invoke('get_dashboard_stats', { 
+    userId: Number(activeUserId),
+    year: Number(selectedYear),
+    month: Number(selectedMonth) // <-- rzutujemy na Number!
+  });
 
     // Zapisujemy odebrany obiekt do zmiennej globalnej
     currentStats = stats;
@@ -276,9 +275,9 @@ async function updateUI() {
 
     // 2. Pobieranie logów z wybranego miesiąca dla wybranego użytkownika
     const logs = await invoke('get_logs', { 
-      userId: activeUserId,
-      year: selectedYear,
-      month: selectedMonth
+      userId: Number(activeUserId),
+      year: Number(selectedYear),
+      month: Number(selectedMonth) // <-- rzutujemy na Number!
     });
     
     tableBody.innerHTML = logs.map(log => `
@@ -688,6 +687,84 @@ async function sendSystemNotification(title, body) {
   } catch (err) {
     console.error("Błąd wysyłania powiadomienia:", err);
   }
+}
+
+/**
+ * Konwertuje sekundy na format tekstowy "Xh Ym Zs" z dokładnością do sekund
+ * @param {number} totalSeconds - Liczba sekund
+ * @param {boolean} showPlus - Czy pokazywać znak '+' przy dodatnich wartościach (dla salda)
+ */
+function formatSeconds(totalSeconds, showPlus = false) {
+  if (totalSeconds === null || totalSeconds === undefined || isNaN(totalSeconds)) {
+    return '0s';
+  }
+
+  const isNegative = totalSeconds < 0;
+  const absSeconds = Math.abs(totalSeconds);
+
+  const hours = Math.floor(absSeconds / 3600);
+  const minutes = Math.floor((absSeconds % 3600) / 60);
+  const seconds = absSeconds % 60;
+
+  let result = "";
+
+  if (hours > 0) {
+    result = `${hours}h ${minutes}m ${seconds}s`;
+  } else if (minutes > 0) {
+    result = `${minutes}m ${seconds}s`;
+  } else {
+    result = `${seconds}s`;
+  }
+
+  if (isNegative) {
+    return `-${result}`;
+  } else if (showPlus && totalSeconds > 0) {
+    return `+${result}`;
+  }
+
+  return result;
+}
+
+let liveTimerInterval = null;
+
+/**
+ * Uruchamia odliczanie w czasie rzeczywistym dla salda i statystyk
+ */
+function startLiveTimer() {
+  // Czyszczenie poprzedniego interwału (jeśli istniał)
+  if (liveTimerInterval) clearInterval(liveTimerInterval);
+
+  liveTimerInterval = setInterval(() => {
+    // Odświeżamy kartę godziny wyjścia (dla powiadomień i koloru czcionki)
+    if (typeof renderLeaveTime === 'function') {
+      renderLeaveTime();
+    }
+
+    // Jeśli nie mamy pobranych statystyk, nic więcej nie robimy
+    if (!currentStats) return;
+
+    // Pobieramy aktywną sesję (jeśli użytkownik pracuje lub jest na przerwie)
+    const balanceEl = document.getElementById('stat-balance');
+    const breakEl = document.getElementById('stat-break');
+
+    // Jeśli sesja jest otwarta (praca trwa)
+    if (currentStats.has_active_work) {
+      currentStats.monthly_balance_seconds += 1;
+      
+      if (balanceEl) {
+        balanceEl.textContent = formatSeconds(currentStats.monthly_balance_seconds, true);
+        balanceEl.style.color = currentStats.monthly_balance_seconds >= 0 ? '#a6e3a1' : '#f38ba8';
+      }
+    } 
+    // Jeśli trwa przerwa prywatna
+    else if (currentStats.has_active_private_break) {
+      currentStats.today_private_break_seconds += 1;
+      
+      if (breakEl) {
+        breakEl.textContent = formatSeconds(currentStats.today_private_break_seconds, false);
+      }
+    }
+  }, 1000); // 1000ms = 1 sekunda
 }
 // Start
 initApp();

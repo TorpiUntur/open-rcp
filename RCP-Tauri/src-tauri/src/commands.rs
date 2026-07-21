@@ -317,38 +317,33 @@ pub fn get_dashboard_stats(
     let today_private_break_seconds: i64 = db
         .query_row(
             "SELECT COALESCE(SUM(duration_seconds), 0) FROM time_log 
-         WHERE user_id = ? AND date = ? AND event_type = 'break_private'",
+             WHERE user_id = ? AND date = ? AND event_type = 'break_private'",
             rusqlite::params![user_id, today],
             |r| r.get(0),
         )
         .unwrap_or(0);
 
     // 3. LICZENIE SALDA DLA KAŻDEGO DNIA Z AKTYWNOŚCIĄ W WYBRANYM MIESIĄCU
-    // Pobieramy sumę sekund przepracowanych w poszczególne dni
     let mut stmt = db.prepare(
         "SELECT date, SUM(duration_seconds) FROM time_log 
-         WHERE user_id = ? AND date LIKE ? AND date <= ? AND event_type IN ('work', 'business') AND duration_seconds IS NOT NULL
+         WHERE user_id = ? AND date LIKE ? AND event_type IN ('work', 'business') AND duration_seconds IS NOT NULL
          GROUP BY date"
     ).map_err(|e| e.to_string())?;
 
     let daily_totals = stmt
         .query_map(
-            rusqlite::params![user_id, target_month_pattern, today],
+            rusqlite::params![user_id, target_month_pattern],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
         )
         .map_err(|e| e.to_string())?;
 
     let mut monthly_balance_seconds: i64 = 0;
 
-    // Dla każdego dnia, w którym pracownik PRZYSZEDŁ DO PRACY:
-    // Bilans dnia = (Przepracowany czas) - (Norma dzienna)
     for day in daily_totals.filter_map(|r| r.ok()) {
         monthly_balance_seconds += day.1 - daily_target_seconds;
     }
 
-    // Urlop / L4 nie modyfikują salda (są ewidencyjne - 8h przyznane, 8h rozliczone = 0h)
-
-    // 4. Wyliczenie godziny wyjścia "Na Zero"
+    // 4. Wyliczenie godzin wyjścia
     let target_leave_time = if let Some(ref first_in) = today_first_in {
         crate::time_calc::calculate_target_leave_time(
             first_in,
