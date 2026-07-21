@@ -290,3 +290,78 @@ pub fn get_dashboard_stats(user_id: i32, state: tauri::State<AppState>) -> Resul
         daily_target_seconds,
     })
 }
+
+// ==========================================
+// 3. EDYCJA RETROAKTYWNA I RAPORTY (KROK 4)
+// ==========================================
+
+// Ręczne dodanie wpisu (retroaktywnie)
+#[tauri::command]
+pub fn add_manual_log(
+    user_id: i32,
+    date: String,
+    time_in: String,
+    time_out: Option<String>,
+    event_type: String,
+    state: tauri::State<AppState>,
+) -> Result<String, String> {
+    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+
+    let full_time_in = format!("{} {}", date, time_in);
+    let full_time_out = time_out.as_ref().map(|t| format!("{} {}", date, t));
+
+    let duration_seconds = if let Some(ref out_time) = full_time_out {
+        Some(crate::time_calc::calculate_duration_seconds(&full_time_in, out_time))
+    } else {
+        None
+    };
+
+    db.execute(
+        "INSERT INTO time_log (user_id, date, time_in, time_out, duration_seconds, event_type) 
+         VALUES (?, ?, ?, ?, ?, ?)",
+        rusqlite::params![user_id, date, full_time_in, full_time_out, duration_seconds, event_type],
+    ).map_err(|e| format!("Błąd dodawania wpisu: {}", e))?;
+
+    Ok("Pomyślnie dodano nowy wpis".into())
+}
+
+// Modyfikacja istniejącego wpisu
+#[tauri::command]
+pub fn update_log(
+    log_id: i32,
+    date: String,
+    time_in: String,
+    time_out: Option<String>,
+    event_type: String,
+    state: tauri::State<AppState>,
+) -> Result<String, String> {
+    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+
+    let full_time_in = format!("{} {}", date, time_in);
+    let full_time_out = time_out.as_ref().filter(|t| !t.is_empty()).map(|t| format!("{} {}", date, t));
+
+    let duration_seconds = if let Some(ref out_time) = full_time_out {
+        Some(crate::time_calc::calculate_duration_seconds(&full_time_in, out_time))
+    } else {
+        None
+    };
+
+    db.execute(
+        "UPDATE time_log SET date = ?, time_in = ?, time_out = ?, duration_seconds = ?, event_type = ? 
+         WHERE id = ?",
+        rusqlite::params![date, full_time_in, full_time_out, duration_seconds, event_type, log_id],
+    ).map_err(|e| format!("Błąd edycji wpisu: {}", e))?;
+
+    Ok("Wpis został zaktualizowany".into())
+}
+
+// Usuwanie wpisu
+#[tauri::command]
+pub fn delete_log(log_id: i32, state: tauri::State<AppState>) -> Result<String, String> {
+    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+
+    db.execute("DELETE FROM time_log WHERE id = ?", [log_id])
+        .map_err(|e| format!("Błąd usuwania: {}", e))?;
+
+    Ok("Usunięto wpis".into())
+}

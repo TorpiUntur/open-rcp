@@ -8,87 +8,131 @@
 </head>
 <body>
 
-  <!-- 1. EKRAN LOGOWANIA -->
+  <!-- EKRAN LOGOWANIA -->
   <main id="login-screen" class="container">
     <h1>Logowanie</h1>
     <form id="login-form">
-      <div class="field">
-        <label>Login:</label>
-        <input type="text" id="username" required placeholder="np. admin" />
+      <div style="margin-bottom: 12px;">
+        <label style="display:block; margin-bottom: 4px;">Login:</label>
+        <input type="text" id="username" required placeholder="np. admin" style="width: 100%; box-sizing: border-box;" />
       </div>
-      <div class="field">
-        <label>Hasło:</label>
-        <input type="password" id="password" required placeholder="••••••••" />
+      <div style="margin-bottom: 12px;">
+        <label style="display:block; margin-bottom: 4px;">Hasło:</label>
+        <input type="password" id="password" required placeholder="••••••••" style="width: 100%; box-sizing: border-box;" />
       </div>
-      <div class="field-checkbox">
+      <div style="margin-bottom: 12px;">
         <input type="checkbox" id="remember-me" checked />
-        <label for="remember-me">Zapamiętaj mnie (Autologowanie)</label>
+        <label for="remember-me">Zapamiętaj mnie</label>
       </div>
       <button type="submit" class="btn-green" style="width: 100%; margin-top: 10px;">Zaloguj się</button>
     </form>
-    <p id="login-error" style="color: #f38ba8; text-align: center;"></p>
+    <p id="login-error" style="color: #f38ba8; text-align: center; margin-top: 10px;"></p>
   </main>
 
-  <!-- 2. GŁÓWNY EKRAN APLIKACJI (Ukryty przed zalogowaniem) -->
+  <!-- GŁÓWNY EKRAN APLIKACJI -->
   <main id="app-screen" class="container" style="display: none;">
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-      <h1>Time Tracker</h1>
+    <!-- Górny Pasek i Nawigacja -->
+    <header style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #45475a; padding-bottom: 10px; margin-bottom: 15px;">
+      <nav style="display: flex; gap: 10px;">
+        <button id="nav-dashboard" class="nav-btn active" style="padding: 8px 16px;">Dashboard Dzienny</button>
+        <button id="nav-reports" class="nav-btn" style="padding: 8px 16px;">Podsumowanie & Wykresy</button>
+      </nav>
       <div>
         <span id="user-info" style="margin-right: 15px; font-weight: bold;"></span>
-        <button id="btn-logout" style="padding: 5px 10px; background: #f38ba8; color: #11111b;">Wyloguj</button>
+        <button id="btn-logout" style="padding: 5px 10px; background: #f38ba8; color: #11111b; border: none; border-radius: 4px; cursor: pointer;">Wyloguj</button>
       </div>
-    </div>
+    </header>
 
-    <!-- Panel Sterowania RCP -->
-    <div class="controls-grid">
-      <button id="btn-start" class="btn-green">Start Pracy</button>
-      <button id="btn-stop" class="btn-red">Stop Pracy</button>
-      <button id="btn-private" class="btn-orange">Wyjście Prywatne</button>
-      <button id="btn-business" class="btn-blue">Wyjście Służbowe</button>
-      <button id="btn-return" class="btn-green" style="display: none;">POWRÓT Z WYJŚCIA</button>
-    </div>
+    <!-- WIDOK 1: DASHBOARD DZIENNY -->
+    <section id="view-dashboard">
+      <div class="controls-grid">
+        <button id="btn-start" class="btn-green">Start Pracy</button>
+        <button id="btn-stop" class="btn-red">Stop Pracy</button>
+        <button id="btn-private" class="btn-orange">Wyjście Prywatne</button>
+        <button id="btn-business" class="btn-blue">Wyjście Służbowe</button>
+        <button id="btn-return" class="btn-green" style="display: none;">POWRÓT Z WYJŚCIA</button>
+      </div>
 
-    <!-- KAFELKI PODSUMOWANIA DZIENNEGO -->
-<div class="stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin: 20px 0;">
-  <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
-    <span style="font-size: 0.85em; color: #a6adc8;">Wejście dzisiaj</span>
-    <h2 id="stat-first-in" style="margin: 5px 0 0 0; color: #89b4fa;">--:--</h2>
-  </div>
+      <p id="status-msg" style="text-align: center; margin: 10px 0;">Gotowy do rejestracji czasu.</p>
 
-  <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
-    <span style="font-size: 0.85em; color: #a6adc8;">Wyjście "Na Zero"</span>
-    <h2 id="stat-target-leave" style="margin: 5px 0 0 0; color: #a6e3a1;">--:--</h2>
-  </div>
+      <!-- Kafelki podsumowania -->
+      <div class="stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin: 20px 0;">
+        <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
+          <span style="font-size: 0.85em; color: #a6adc8;">Wejście dzisiaj</span>
+          <h2 id="stat-first-in" style="margin: 5px 0 0 0; color: #89b4fa;">--:--</h2>
+        </div>
+        <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
+          <span style="font-size: 0.85em; color: #a6adc8;">Wyjście "Na Zero"</span>
+          <h2 id="stat-target-leave" style="margin: 5px 0 0 0; color: #a6e3a1;">--:--</h2>
+        </div>
+        <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
+          <span style="font-size: 0.85em; color: #a6adc8;">Saldo Miesięczne</span>
+          <h2 id="stat-balance" style="margin: 5px 0 0 0;">0 min</h2>
+        </div>
+        <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
+          <span style="font-size: 0.85em; color: #a6adc8;">Prywatne dzisiaj</span>
+          <h2 id="stat-break" style="margin: 5px 0 0 0; color: #fab387;">0 min</h2>
+        </div>
+      </div>
+    </section>
 
-  <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
-    <span style="font-size: 0.85em; color: #a6adc8;">Saldo Miesięczne</span>
-    <h2 id="stat-balance" style="margin: 5px 0 0 0;">0 min</h2>
-  </div>
+    <!-- WIDOK 2: PODSUMOWANIE MIESIĘCZNE & EDYCJA -->
+    <section id="view-reports" style="display: none;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+        <h2>Historia Wpisów i Edycja</h2>
+        <button id="btn-add-manual" style="padding: 8px 15px; background: #a6e3a1; color: #11111b; font-weight: bold; border: none; border-radius: 4px; cursor: pointer;">+ Dodaj Zapomniany Wpis</button>
+      </div>
 
-  <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
-    <span style="font-size: 0.85em; color: #a6adc8;">Prywatne dzisiaj</span>
-    <h2 id="stat-break" style="margin: 5px 0 0 0; color: #fab387;">0 min</h2>
-  </div>
-</div>
-
-    <p id="status-msg">Gotowy do rejestracji czasu.</p>
-    <hr />
-
-    <h2>Historia rejestracji</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Data</th>
-          <th>Start</th>
-          <th>Stop</th>
-          <th>Czas</th>
-          <th>Typ zdarzenia</th>
-        </tr>
-      </thead>
-      <tbody id="logs-table-body"></tbody>
-    </table>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Data</th>
+            <th>Start</th>
+            <th>Stop</th>
+            <th>Czas</th>
+            <th>Typ</th>
+            <th>Akcje</th>
+          </tr>
+        </thead>
+        <tbody id="logs-table-body"></tbody>
+      </table>
+    </section>
   </main>
+
+  <!-- MODAL DO EDYCJI / DODAWANIA WPISU -->
+  <dialog id="edit-dialog" style="background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-radius: 8px; padding: 20px; width: 320px;">
+    <form id="edit-form" method="dialog">
+      <h3 id="dialog-title" style="margin-top: 0;">Edycja Wpisu</h3>
+      <input type="hidden" id="edit-id" />
+
+      <div style="margin-bottom: 10px;">
+        <label style="display:block;">Data:</label>
+        <input type="date" id="edit-date" required style="width: 100%; box-sizing: border-box;" />
+      </div>
+      <div style="margin-bottom: 10px;">
+        <label style="display:block;">Godzina Start (HH:MM:SS):</label>
+        <input type="text" id="edit-time-in" required placeholder="08:00:00" style="width: 100%; box-sizing: border-box;" />
+      </div>
+      <div style="margin-bottom: 10px;">
+        <label style="display:block;">Godzina Stop (HH:MM:SS):</label>
+        <input type="text" id="edit-time-out" placeholder="16:00:00" style="width: 100%; box-sizing: border-box;" />
+      </div>
+      <div style="margin-bottom: 15px;">
+        <label style="display:block;">Typ zdarzenia:</label>
+        <select id="edit-event-type" style="width: 100%; box-sizing: border-box; padding: 5px;">
+          <option value="work">Praca przy biurku</option>
+          <option value="break_private">Wyjście prywatne</option>
+          <option value="business">Wyjście służbowe</option>
+        </select>
+      </div>
+
+      <div style="display: flex; justify-content: space-between;">
+        <button type="button" id="btn-dialog-cancel" style="background: #6c7086;">Anuluj</button>
+        <button type="submit" class="btn-green">Zapisz</button>
+      </div>
+    </form>
+  </dialog>
 
   <script type="module" src="./main.js"></script>
 </body>

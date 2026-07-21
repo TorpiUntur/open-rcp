@@ -34,7 +34,10 @@ pub fn run() {
             commands::clock_out,
             commands::return_to_work,
             commands::get_logs,
-            commands::get_dashboard_stats // <-- DODAJ TO
+            commands::get_dashboard_stats,
+            commands::add_manual_log,
+            commands::update_log,     
+            commands::delete_log     
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
