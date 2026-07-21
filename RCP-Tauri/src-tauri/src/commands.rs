@@ -257,7 +257,7 @@ pub fn get_dashboard_stats(user_id: i32, state: tauri::State<AppState>) -> Resul
     // 4. Saldo z poprzednich dni miesiąca (w sekundach)
     let mut stmt = db.prepare(
         "SELECT date, SUM(duration_seconds) FROM time_log 
-         WHERE user_id = ? AND date >= ? AND date < ? AND event_type IN ('work', 'business') AND duration_seconds IS NOT NULL
+         WHERE user_id = ? AND date >= ? AND date <= ? AND event_type IN ('work', 'business') AND duration_seconds IS NOT NULL
          GROUP BY date"
     ).map_err(|e| e.to_string())?;
 
@@ -364,4 +364,35 @@ pub fn delete_log(log_id: i32, state: tauri::State<AppState>) -> Result<String, 
         .map_err(|e| format!("Błąd usuwania: {}", e))?;
 
     Ok("Usunięto wpis".into())
+}
+
+// ==========================================
+// 4. USTAWIENIA I ZARZĄDZANIE UŻYTKOWNIKAMI (KROK 5)
+// ==========================================
+
+// Pobieranie domyślnej normy dziennej w sekundach
+#[tauri::command]
+pub fn get_daily_target_seconds(state: tauri::State<AppState>) -> Result<i64, String> {
+    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+
+    let seconds_str: String = db.query_row(
+        "SELECT value FROM settings WHERE key = 'daily_target_seconds'",
+        [],
+        |r| r.get(0),
+    ).unwrap_or_else(|_| "28800".to_string());
+
+    Ok(seconds_str.parse().unwrap_or(28800))
+}
+
+// Zapisywanie nowej normy dziennej
+#[tauri::command]
+pub fn set_daily_target_seconds(seconds: i64, state: tauri::State<AppState>) -> Result<String, String> {
+    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+
+    db.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('daily_target_seconds', ?)",
+        [seconds.to_string()],
+    ).map_err(|e| format!("Błąd zapisu ustawień: {}", e))?;
+
+    Ok("Zapisano nową normę czasową".into())
 }

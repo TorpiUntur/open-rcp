@@ -5,8 +5,10 @@ const loginScreen = document.getElementById('login-screen');
 const appScreen = document.getElementById('app-screen');
 const navDashboard = document.getElementById('nav-dashboard');
 const navReports = document.getElementById('nav-reports');
+const navSettings = document.getElementById('nav-settings');
 const viewDashboard = document.getElementById('view-dashboard');
 const viewReports = document.getElementById('view-reports');
+const viewSettings = document.getElementById('view-settings');
 
 // Logowanie i użytkownik
 const loginForm = document.getElementById('login-form');
@@ -37,6 +39,18 @@ const editTimeOut = document.getElementById('edit-time-out');
 const editEventType = document.getElementById('edit-event-type');
 const btnAddManual = document.getElementById('btn-add-manual');
 const btnDialogCancel = document.getElementById('btn-dialog-cancel');
+
+// Elementy Ustawień i Admina
+const formSettingsTarget = document.getElementById('form-settings-target');
+const targetHours = document.getElementById('target-hours');
+const targetMinutes = document.getElementById('target-minutes');
+const targetMsg = document.getElementById('target-msg');
+const adminUserPanel = document.getElementById('admin-user-panel');
+const formCreateUser = document.getElementById('form-create-user');
+const newUsername = document.getElementById('new-username');
+const newPassword = document.getElementById('new-password');
+const newRole = document.getElementById('new-role');
+const createUserMsg = document.getElementById('create-user-msg');
 
 let currentUser = null;
 
@@ -70,26 +84,36 @@ function showAppScreen() {
   loginScreen.style.display = 'none';
   appScreen.style.display = 'block';
   userInfo.textContent = `Zalogowany: ${currentUser.username} (${currentUser.role})`;
+  
+  // Pokazujemy panel kont tylko dla Admina
+  if (currentUser.role === 'admin') {
+    adminUserPanel.style.display = 'block';
+  } else {
+    adminUserPanel.style.display = 'none';
+  }
+
   switchTab('dashboard');
 }
 
 // 2. Nawigacja po zakładkach
 navDashboard.addEventListener('click', () => switchTab('dashboard'));
 navReports.addEventListener('click', () => switchTab('reports'));
+navSettings.addEventListener('click', () => switchTab('settings'));
 
 function switchTab(tab) {
-  if (tab === 'dashboard') {
-    viewDashboard.style.display = 'block';
-    viewReports.style.display = 'none';
-    navDashboard.classList.add('active');
-    navReports.classList.remove('active');
+  viewDashboard.style.display = tab === 'dashboard' ? 'block' : 'none';
+  viewReports.style.display = tab === 'reports' ? 'block' : 'none';
+  viewSettings.style.display = tab === 'settings' ? 'block' : 'none';
+
+  navDashboard.classList.toggle('active', tab === 'dashboard');
+  navReports.classList.toggle('active', tab === 'reports');
+  navSettings.classList.toggle('active', tab === 'settings');
+
+  if (tab === 'settings') {
+    loadSettings();
   } else {
-    viewDashboard.style.display = 'none';
-    viewReports.style.display = 'block';
-    navReports.classList.add('active');
-    navDashboard.classList.remove('active');
+    updateUI();
   }
-  updateUI();
 }
 
 // 3. Logowanie i Wylogowanie
@@ -130,7 +154,6 @@ async function updateUI() {
   if (!currentUser) return;
 
   try {
-    // Statystyki
     const stats = await invoke('get_dashboard_stats', { userId: currentUser.id });
 
     document.getElementById('stat-first-in').textContent = stats.today_first_in 
@@ -145,7 +168,6 @@ async function updateUI() {
 
     document.getElementById('stat-break').textContent = formatSeconds(stats.today_private_break_seconds, false);
 
-    // Tabela wpisów
     const logs = await invoke('get_logs', { userId: currentUser.id });
     
     tableBody.innerHTML = logs.map(log => `
@@ -163,7 +185,6 @@ async function updateUI() {
       </tr>
     `).join('');
 
-    // Stan przycisków RCP
     const activeLog = logs.length > 0 && !logs[0].time_out ? logs[0] : null;
 
     if (!activeLog) {
@@ -194,6 +215,52 @@ async function updateUI() {
   }
 }
 
+// 5. Obsługa Ustawień i Tworzenia Użytkowników
+async function loadSettings() {
+  try {
+    const totalSeconds = await invoke('get_daily_target_seconds');
+    targetHours.value = Math.floor(totalSeconds / 3600);
+    targetMinutes.value = Math.floor((totalSeconds % 3600) / 60);
+  } catch (err) {
+    console.error("Błąd ładowania ustawień:", err);
+  }
+}
+
+formSettingsTarget.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  targetMsg.textContent = "";
+  
+  const h = parseInt(targetHours.value) || 0;
+  const m = parseInt(targetMinutes.value) || 0;
+  const totalSec = (h * 3600) + (m * 60);
+
+  try {
+    targetMsg.textContent = await invoke('set_daily_target_seconds', { seconds: totalSec });
+  } catch (err) {
+    targetMsg.textContent = "Błąd: " + err;
+  }
+});
+
+formCreateUser.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  createUserMsg.textContent = "";
+
+  try {
+    const msg = await invoke('create_user', {
+      username: newUsername.value,
+      password: newPassword.value,
+      role: newRole.value
+    });
+    createUserMsg.style.color = "#a6e3a1";
+    createUserMsg.textContent = msg;
+    newUsername.value = "";
+    newPassword.value = "";
+  } catch (err) {
+    createUserMsg.style.color = "#f38ba8";
+    createUserMsg.textContent = err;
+  }
+});
+
 // Globalne funkcje wywoływane z tabeli
 window.openEditModal = (id, date, timeIn, timeOut, eventType) => {
   dialogTitle.textContent = "Edycja Wpisu #" + id;
@@ -214,7 +281,7 @@ window.deleteLogEntry = async (id) => {
   }
 };
 
-// Ręczne dodawanie zapomnianego wpisu
+// Modale i Formularze
 btnAddManual.addEventListener('click', () => {
   dialogTitle.textContent = "Dodaj Zapomniany Wpis";
   editId.value = "";
@@ -227,12 +294,10 @@ btnAddManual.addEventListener('click', () => {
 
 btnDialogCancel.addEventListener('click', () => editDialog.close());
 
-// Zapisywanie formularza edycji/dodawania
 editForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   try {
     if (editId.value) {
-      // Aktualizacja
       await invoke('update_log', {
         logId: parseInt(editId.value),
         date: editDate.value,
@@ -241,7 +306,6 @@ editForm.addEventListener('submit', async (e) => {
         eventType: editEventType.value
       });
     } else {
-      // Nowy wpis
       await invoke('add_manual_log', {
         userId: currentUser.id,
         date: editDate.value,

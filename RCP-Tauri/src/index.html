@@ -36,6 +36,7 @@
       <nav style="display: flex; gap: 10px;">
         <button id="nav-dashboard" class="nav-btn active" style="padding: 8px 16px;">Dashboard Dzienny</button>
         <button id="nav-reports" class="nav-btn" style="padding: 8px 16px;">Podsumowanie & Wykresy</button>
+        <button id="nav-settings" class="nav-btn" style="padding: 8px 16px;">Ustawienia</button>
       </nav>
       <div>
         <span id="user-info" style="margin-right: 15px; font-weight: bold;"></span>
@@ -55,7 +56,6 @@
 
       <p id="status-msg" style="text-align: center; margin: 10px 0;">Gotowy do rejestracji czasu.</p>
 
-      <!-- Kafelki podsumowania -->
       <div class="stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin: 20px 0;">
         <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
           <span style="font-size: 0.85em; color: #a6adc8;">Wejście dzisiaj</span>
@@ -97,6 +97,54 @@
         </thead>
         <tbody id="logs-table-body"></tbody>
       </table>
+    </section>
+
+    <!-- WIDOK 3: USTAWIENIA & ZARZĄDZANIE UŻYTKOWNIKAMI -->
+    <section id="view-settings" style="display: none;">
+      <h2>Ustawienia Aplikacji</h2>
+      
+      <!-- Ustawienie Normy Czasowej -->
+      <div class="card" style="background: #2b2b36; padding: 20px; border-radius: 8px; margin-bottom: 20px; max-width: 400px;">
+        <h3>Domyślna Dzienna Norma Pracy</h3>
+        <form id="form-settings-target">
+          <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px;">
+            <div>
+              <label style="display:block; font-size: 0.85em;">Godziny:</label>
+              <input type="number" id="target-hours" min="0" max="24" value="8" style="width: 70px; padding: 5px;" />
+            </div>
+            <div>
+              <label style="display:block; font-size: 0.85em;">Minuty:</label>
+              <input type="number" id="target-minutes" min="0" max="59" value="0" style="width: 70px; padding: 5px;" />
+            </div>
+          </div>
+          <button type="submit" class="btn-green" style="padding: 8px 15px;">Zapisz Normę</button>
+        </form>
+        <p id="target-msg" style="color: #a6e3a1; margin-top: 10px;"></p>
+      </div>
+
+      <!-- Panel Admina: Tworzenie kont (Widoczny tylko dla roli 'admin') -->
+      <div id="admin-user-panel" class="card" style="background: #2b2b36; padding: 20px; border-radius: 8px; max-width: 400px; display: none;">
+        <h3>Zarządzanie Użytkownikami (Tylko Admin)</h3>
+        <form id="form-create-user">
+          <div style="margin-bottom: 10px;">
+            <label style="display:block;">Nowy Login:</label>
+            <input type="text" id="new-username" required style="width: 100%; box-sizing: border-box;" placeholder="np. jan.kowalski" />
+          </div>
+          <div style="margin-bottom: 10px;">
+            <label style="display:block;">Hasło:</label>
+            <input type="password" id="new-password" required style="width: 100%; box-sizing: border-box;" placeholder="••••••••" />
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display:block;">Rola:</label>
+            <select id="new-role" style="width: 100%; box-sizing: border-box; padding: 5px;">
+              <option value="user">Pracownik (User)</option>
+              <option value="admin">Administrator (Admin)</option>
+            </select>
+          </div>
+          <button type="submit" class="btn-blue" style="width: 100%; padding: 8px;">Utwórz Konto</button>
+        </form>
+        <p id="create-user-msg" style="margin-top: 10px; text-align: center;"></p>
+      </div>
     </section>
   </main>
 
