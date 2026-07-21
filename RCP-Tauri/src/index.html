@@ -48,6 +48,29 @@
       <button id="btn-return" class="btn-green" style="display: none;">POWRÓT Z WYJŚCIA</button>
     </div>
 
+    <!-- KAFELKI PODSUMOWANIA DZIENNEGO -->
+<div class="stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin: 20px 0;">
+  <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
+    <span style="font-size: 0.85em; color: #a6adc8;">Wejście dzisiaj</span>
+    <h2 id="stat-first-in" style="margin: 5px 0 0 0; color: #89b4fa;">--:--</h2>
+  </div>
+
+  <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
+    <span style="font-size: 0.85em; color: #a6adc8;">Wyjście "Na Zero"</span>
+    <h2 id="stat-target-leave" style="margin: 5px 0 0 0; color: #a6e3a1;">--:--</h2>
+  </div>
+
+  <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
+    <span style="font-size: 0.85em; color: #a6adc8;">Saldo Miesięczne</span>
+    <h2 id="stat-balance" style="margin: 5px 0 0 0;">0 min</h2>
+  </div>
+
+  <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
+    <span style="font-size: 0.85em; color: #a6adc8;">Prywatne dzisiaj</span>
+    <h2 id="stat-break" style="margin: 5px 0 0 0; color: #fab387;">0 min</h2>
+  </div>
+</div>
+
     <p id="status-msg">Gotowy do rejestracji czasu.</p>
     <hr />
 

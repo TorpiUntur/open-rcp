@@ -34,20 +34,26 @@ pub fn initialize_database(app_handle: &AppHandle) -> Result<Connection, Box<dyn
     )?;
 
     // 3. Tabela Rejestracji Czasu
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS time_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            date TEXT NOT NULL,
-            time_in TEXT NOT NULL,
-            time_out TEXT,
-            duration_minutes INTEGER,
-            event_type TEXT DEFAULT 'work',
-            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-        )",
-        [],
-    )?;
+    // W db.rs
+conn.execute(
+    "CREATE TABLE IF NOT EXISTS time_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        time_in TEXT NOT NULL,
+        time_out TEXT,
+        duration_seconds INTEGER,
+        event_type TEXT DEFAULT 'work',
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    )",
+    [],
+)?;
 
+// Ustawienie normy dziennej na 28800 sekund (8h)
+conn.execute(
+    "INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_target_seconds', '28800')",
+    [],
+)?;
     // 4. Tabela Absencji (L4 / Urlopy)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS absence_log (

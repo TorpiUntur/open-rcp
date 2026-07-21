@@ -16,8 +16,17 @@ pub struct TimeLog {
     pub date: String,
     pub time_in: String,
     pub time_out: Option<String>,
-    pub duration_minutes: Option<i32>,
+    pub duration_seconds: Option<i64>,
     pub event_type: String,
+}
+
+#[derive(Serialize)]
+pub struct DashboardStats {
+    pub today_first_in: Option<String>,
+    pub target_leave_time: String,
+    pub monthly_balance_seconds: i64,     // W sekundach
+    pub today_private_break_seconds: i64, // W sekundach
+    pub daily_target_seconds: i64,        // W sekundach
 }
 
 // ==========================================
@@ -111,7 +120,6 @@ pub fn clock_in(user_id: i32, event_type: String, state: tauri::State<AppState>)
     let now = crate::time_calc::current_timestamp();
     let date = crate::time_calc::current_date();
 
-    // Sprawdzamy aktywną sesję konkretnego użytkownika
     let active_event: Option<String> = db.query_row(
         "SELECT event_type FROM time_log WHERE user_id = ? AND date = ? AND time_out IS NULL ORDER BY id DESC LIMIT 1",
         params![user_id, date],
@@ -176,15 +184,14 @@ fn clock_out_internal(db: &rusqlite::Connection, user_id: i32, date: &str, now: 
         "SELECT id, time_in FROM time_log WHERE user_id = ? AND date = ? AND time_out IS NULL ORDER BY id DESC LIMIT 1"
     ).map_err(|e| e.to_string())?;
 
-    let row = stmt.query_row(params![user_id, date], |r| Ok((r.get::<_, i32>(0)?, r.get::<_, String>(1)?)));
+    let row = stmt.query_row(rusqlite::params![user_id, date], |r| Ok((r.get::<_, i32>(0)?, r.get::<_, String>(1)?)));
 
     if let Ok((id, time_in)) = row {
-        // Obliczenie minut przez nasz moduł time_calc
-        let duration = crate::time_calc::calculate_duration_minutes(&time_in, now);
+        let duration = crate::time_calc::calculate_duration_seconds(&time_in, now);
 
         db.execute(
-            "UPDATE time_log SET time_out = ?, duration_minutes = ? WHERE id = ?",
-            params![now, duration, id],
+            "UPDATE time_log SET time_out = ?, duration_seconds = ? WHERE id = ?",
+            rusqlite::params![now, duration, id],
         ).map_err(|e| e.to_string())?;
         Ok(())
     } else {
@@ -195,8 +202,10 @@ fn clock_out_internal(db: &rusqlite::Connection, user_id: i32, date: &str, now: 
 #[tauri::command]
 pub fn get_logs(user_id: i32, state: tauri::State<AppState>) -> Result<Vec<TimeLog>, String> {
     let db = state.db.lock().map_err(|_| "Błąd blokady bazy danych")?;
+    
+    // ZMIANA: Pobieramy duration_seconds zamiast duration_minutes
     let mut stmt = db.prepare(
-        "SELECT id, user_id, date, time_in, time_out, duration_minutes, event_type 
+        "SELECT id, user_id, date, time_in, time_out, duration_seconds, event_type 
          FROM time_log WHERE user_id = ? ORDER BY id DESC"
     ).map_err(|e| e.to_string())?;
 
@@ -207,7 +216,7 @@ pub fn get_logs(user_id: i32, state: tauri::State<AppState>) -> Result<Vec<TimeL
             date: row.get(2)?,
             time_in: row.get(3)?,
             time_out: row.get(4)?,
-            duration_minutes: row.get(5)?,
+            duration_seconds: row.get(5)?, // Przypisujemy prawidłowo sekundy
             event_type: row.get(6)?,
         })
     }).map_err(|e| e.to_string())?
@@ -215,4 +224,69 @@ pub fn get_logs(user_id: i32, state: tauri::State<AppState>) -> Result<Vec<TimeL
     .collect();
 
     Ok(logs)
+}
+
+#[tauri::command]
+pub fn get_dashboard_stats(user_id: i32, state: tauri::State<AppState>) -> Result<DashboardStats, String> {
+    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+    let today = crate::time_calc::current_date();
+    let month_start = crate::time_calc::current_month_start();
+
+    // 1. Norma dzienna w SEKUNDACH (domyślnie 8h = 28800 s)
+    let daily_target_seconds: i64 = db.query_row(
+        "SELECT value FROM settings WHERE key = 'daily_target_seconds'",
+        [],
+        |r| r.get::<_, String>(0),
+    ).unwrap_or_else(|_| "28800".to_string()).parse().unwrap_or(28800);
+
+    // 2. Pierwsze wejście dzisiaj
+    let today_first_in: Option<String> = db.query_row(
+        "SELECT time_in FROM time_log WHERE user_id = ? AND date = ? ORDER BY id ASC LIMIT 1",
+        rusqlite::params![user_id, today],
+        |r| r.get(0),
+    ).ok();
+
+    // 3. Łączny czas przerw prywatnych dzisiaj (w sekundach)
+    let today_private_break_seconds: i64 = db.query_row(
+        "SELECT COALESCE(SUM(duration_seconds), 0) FROM time_log 
+         WHERE user_id = ? AND date = ? AND event_type = 'break_private'",
+        rusqlite::params![user_id, today],
+        |r| r.get(0),
+    ).unwrap_or(0);
+
+    // 4. Saldo z poprzednich dni miesiąca (w sekundach)
+    let mut stmt = db.prepare(
+        "SELECT date, SUM(duration_seconds) FROM time_log 
+         WHERE user_id = ? AND date >= ? AND date < ? AND event_type IN ('work', 'business') AND duration_seconds IS NOT NULL
+         GROUP BY date"
+    ).map_err(|e| e.to_string())?;
+
+    let daily_totals = stmt.query_map(rusqlite::params![user_id, month_start, today], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    }).map_err(|e| e.to_string())?;
+
+    let mut previous_days_balance_seconds: i64 = 0;
+    for day in daily_totals.filter_map(|r| r.ok()) {
+        previous_days_balance_seconds += day.1 - daily_target_seconds;
+    }
+
+    // 5. Godzina wyjścia na zero
+    let target_leave_time = if let Some(ref first_in) = today_first_in {
+        crate::time_calc::calculate_target_leave_time(
+            first_in,
+            daily_target_seconds,
+            previous_days_balance_seconds,
+            today_private_break_seconds,
+        )
+    } else {
+        "---".to_string()
+    };
+
+    Ok(DashboardStats {
+        today_first_in,
+        target_leave_time,
+        monthly_balance_seconds: previous_days_balance_seconds,
+        today_private_break_seconds,
+        daily_target_seconds,
+    })
 }

@@ -82,11 +82,39 @@ btnLogout.addEventListener('click', async () => {
   showLoginScreen();
 });
 
-// 4. Aktualizacja Dashboardu RCP (z przekazaniem userId!)
+// Pomocnicza funkcja formatowania sekund do "1h 23m 45s" lub "+0h 15m 02s"
+function formatSeconds(totalSeconds, includeSign = true) {
+  const sign = totalSeconds < 0 ? "-" : (includeSign ? "+" : "");
+  const absSec = Math.abs(totalSeconds);
+  
+  const hours = Math.floor(absSec / 3600);
+  const minutes = Math.floor((absSec % 3600) / 60);
+  const seconds = absSec % 60;
+
+  return `${sign}${hours}h ${minutes}m ${seconds}s`;
+}
+
+// 4. Odświeżanie statystyk, tabeli oraz przełączanie stanu przycisków
 async function updateUI() {
   if (!currentUser) return;
 
   try {
+    // A. Statystyki Kafelków
+    const stats = await invoke('get_dashboard_stats', { userId: currentUser.id });
+
+    document.getElementById('stat-first-in').textContent = stats.today_first_in 
+      ? (stats.today_first_in.split(' ')[1] || stats.today_first_in) 
+      : '--:--';
+    
+    document.getElementById('stat-target-leave').textContent = stats.target_leave_time;
+    
+    const balanceEl = document.getElementById('stat-balance');
+    balanceEl.textContent = formatSeconds(stats.monthly_balance_seconds, true);
+    balanceEl.style.color = stats.monthly_balance_seconds >= 0 ? '#a6e3a1' : '#f38ba8';
+
+    document.getElementById('stat-break').textContent = formatSeconds(stats.today_private_break_seconds, false);
+
+    // B. Tabela Logów
     const logs = await invoke('get_logs', { userId: currentUser.id });
     
     tableBody.innerHTML = logs.map(log => `
@@ -95,11 +123,12 @@ async function updateUI() {
         <td>${log.date}</td>
         <td>${log.time_in.split(' ')[1] || log.time_in}</td>
         <td>${log.time_out ? (log.time_out.split(' ')[1] || log.time_out) : 'W trakcie...'}</td>
-        <td>${log.duration_minutes !== null ? log.duration_minutes + ' min' : '---'}</td>
+        <td>${log.duration_seconds !== null ? formatSeconds(log.duration_seconds, false) : '---'}</td>
         <td><b>${eventLabels[log.event_type] || log.event_type}</b></td>
       </tr>
     `).join('');
 
+    // C. Przełączanie aktywacji przycisków (Maszyna Stanów)
     const activeLog = logs.length > 0 && !logs[0].time_out ? logs[0] : null;
 
     if (!activeLog) {
@@ -126,11 +155,11 @@ async function updateUI() {
       btnReturn.style.display = 'inline-block';
     }
   } catch (err) {
-    console.error("Błąd ładowania danych:", err);
+    console.error("Błąd UI:", err);
   }
 }
 
-// 5. Obsługa Przyprzycisków RCP (z wysyłaniem userId)
+// 5. Obsługa Przycisków RCP (z wywoływaniem zaktualizowanego UI)
 btnStart.addEventListener('click', async () => {
   try {
     statusMsg.textContent = await invoke('clock_in', { userId: currentUser.id, eventType: 'work' });
@@ -166,5 +195,5 @@ btnStop.addEventListener('click', async () => {
   } catch (e) { statusMsg.textContent = e; }
 });
 
-// Inicjalizacja przy starcie
+// Inicjalizacja aplikacji przy starcie
 initApp();
