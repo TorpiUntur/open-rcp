@@ -3,7 +3,9 @@ use std::fs;
 use tauri::AppHandle;
 use tauri::Manager;
 
-pub fn initialize_database(app_handle: &AppHandle) -> Result<Connection, Box<dyn std::error::Error>> {
+pub fn initialize_database(
+    app_handle: &AppHandle,
+) -> Result<Connection, Box<dyn std::error::Error>> {
     let app_dir = app_handle.path().app_data_dir()?;
     fs::create_dir_all(&app_dir)?;
 
@@ -35,8 +37,8 @@ pub fn initialize_database(app_handle: &AppHandle) -> Result<Connection, Box<dyn
 
     // 3. Tabela Rejestracji Czasu
     // W db.rs
-conn.execute(
-    "CREATE TABLE IF NOT EXISTS time_log (
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS time_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
         date TEXT NOT NULL,
@@ -46,14 +48,14 @@ conn.execute(
         event_type TEXT DEFAULT 'work',
         FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     )",
-    [],
-)?;
+        [],
+    )?;
 
-// Ustawienie normy dziennej na 28800 sekund (8h)
-conn.execute(
-    "INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_target_seconds', '28800')",
-    [],
-)?;
+    // Ustawienie normy dziennej na 28800 sekund (8h)
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_target_seconds', '28800')",
+        [],
+    )?;
     // 4. Tabela Absencji (L4 / Urlopy)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS absence_log (
@@ -74,7 +76,7 @@ conn.execute(
 
 fn seed_initial_data(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     let default_pass_hash = format!("{:x}", md5::compute("admin123"));
-    
+
     // Zapytanie doda admina jeśli użytkownik 'admin' jeszcze nie istnieje
     conn.execute(
         "INSERT OR IGNORE INTO users (username, password_hash, role) VALUES ('admin', ?, 'admin')",

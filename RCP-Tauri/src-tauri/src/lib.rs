@@ -1,9 +1,9 @@
-use std::sync::Mutex;
 use rusqlite::Connection;
+use std::sync::Mutex;
 use tauri::Manager;
 
-mod db;
 mod commands;
+mod db;
 mod time_calc; // Twój plik z kalkulacjami
 
 pub struct AppState {
@@ -13,6 +13,7 @@ pub struct AppState {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // Inicjalizacja bazy danych

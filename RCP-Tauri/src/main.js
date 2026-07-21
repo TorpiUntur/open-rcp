@@ -70,6 +70,13 @@ let selectedMonth = new Date().getMonth() + 1; // 1 - 12
 
 let targetUserId = null; // ID użytkownika, którego dane są aktualnie podglądane
 
+let currentStats = null;
+let showZeroLeaveMode = true; // true: "Na Zero", false: "Pełny Dzień Pracy (8h)"
+
+let notifiedZero = false;
+let notifiedStandard = false;
+
+
 const adminUserSelectContainer = document.getElementById('admin-user-select-container');
 const selectUser = document.getElementById('select-user');
 
@@ -178,15 +185,63 @@ btnLogout.addEventListener('click', async () => {
   showLoginScreen();
 });
 
-// Formatowanie sekund do hh:mm:ss
-function formatSeconds(totalSeconds, includeSign = true) {
-  const sign = totalSeconds < 0 ? "-" : (includeSign ? "+" : "");
-  const absSec = Math.abs(totalSeconds);
-  const hours = Math.floor(absSec / 3600);
-  const minutes = Math.floor((absSec % 3600) / 60);
-  const seconds = absSec % 60;
-  return `${sign}${hours}h ${minutes}m ${seconds}s`;
+const cardToggleLeave = document.getElementById('card-toggle-leave');
+const statLeaveLabel = document.getElementById('stat-leave-label');
+const statTargetLeave = document.getElementById('stat-target-leave');
+
+// Listener kliknięcia w kafel
+if (cardToggleLeave) {
+  cardToggleLeave.addEventListener('click', () => {
+    showZeroLeaveMode = !showZeroLeaveMode; // Odwracamy stan (true/false)
+    renderLeaveTime();                      // Odświeżamy tylko godzinę wyjścia
+  });
 }
+
+// Funkcja zmieniająca tekst i godzinę w zależności od wybranego trybu
+function renderLeaveTime() {
+  if (!currentStats || !statTargetLeave) return;
+
+  const now = new Date();
+  const currentFormattedTime = now.toTimeString().split(' ')[0]; // np. "14:45:02"
+
+  const targetZero = currentStats.targetLeaveTime || currentStats.target_leave_time || "---";
+  const targetStandard = currentStats.standardLeaveTime || currentStats.standard_leave_time || "---";
+
+  // Sprawdzanie przekroczenia czasu dla Na Zero
+  const isZeroPassed = targetZero !== "---" && currentFormattedTime >= targetZero;
+  // Sprawdzanie przekroczenia czasu dla Pełnego Dnia
+  const isStandardPassed = targetStandard !== "---" && currentFormattedTime >= targetStandard;
+
+  if (showZeroLeaveMode) {
+    if (statLeaveLabel) statLeaveLabel.textContent = "Wyjście (Na Zero) 🔄";
+    statTargetLeave.textContent = targetZero;
+    // Zmiana koloru czcionki na zielony po osiągnięciu progu Na Zero
+    statTargetLeave.style.color = isZeroPassed ? '#a6e3a1' : 'inherit';
+  } else {
+    if (statLeaveLabel) statLeaveLabel.textContent = "Wyjście (Pełny Dzień) 🔄";
+    statTargetLeave.textContent = targetStandard;
+    // Zmiana koloru czcionki na zielony po osiągnięciu 8h
+    statTargetLeave.style.color = isStandardPassed ? '#a6e3a1' : 'inherit';
+  }
+
+  // LOGIKA POWIADOMIEŃ SYSTEMOWYCH:
+  if (isZeroPassed && !notifiedZero) {
+    sendSystemNotification("RCP Time Tracker", "Osiągnięto stan NA ZERO! Możesz bezpiecznie wyjść bez zaległości.");
+    notifiedZero = true;
+  }
+
+  if (isStandardPassed && !notifiedStandard) {
+    sendSystemNotification("RCP Time Tracker", "Ukończono pełny dzień pracy (8h)!");
+    notifiedStandard = true;
+  }
+}
+
+// Wstaw wywołanie checkTimers co sekundę, by odświeżać stan w czasie rzeczywistym
+setInterval(() => {
+  if (currentStats) {
+    renderLeaveTime();
+  }
+}, 1000);
 
 // 5. Odświeżanie Dashboardu i Tabeli Logów
 async function updateUI() {
@@ -201,11 +256,17 @@ async function updateUI() {
       month: selectedMonth
     });
 
+    // Zapisujemy odebrany obiekt do zmiennej globalnej
+    currentStats = stats;
+
+    // Wywołujemy naszą funkcję przełączającą godzinę wyjścia
+    renderLeaveTime();
+
     document.getElementById('stat-first-in').textContent = stats.today_first_in 
       ? (stats.today_first_in.split(' ')[1] || stats.today_first_in) 
       : '--:--';
     
-    document.getElementById('stat-target-leave').textContent = stats.target_leave_time;
+    // Usunięto stat-target-leave.textContent, ponieważ obsługuje go renderLeaveTime()
     
     const balanceEl = document.getElementById('stat-balance');
     balanceEl.textContent = formatSeconds(stats.monthly_balance_seconds, true);
@@ -614,5 +675,19 @@ selectUser.addEventListener('change', (e) => {
   updateUI();
 });
 
+async function sendSystemNotification(title, body) {
+  try {
+    if (window.__TAURI__?.notification) {
+      const permissionGranted = await window.__TAURI__.notification.isPermissionGranted();
+      if (!permissionGranted) {
+        const permission = await window.__TAURI__.notification.requestPermission();
+        if (permission !== 'granted') return;
+      }
+      await window.__TAURI__.notification.sendNotification({ title, body });
+    }
+  } catch (err) {
+    console.error("Błąd wysyłania powiadomienia:", err);
+  }
+}
 // Start
 initApp();

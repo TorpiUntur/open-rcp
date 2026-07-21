@@ -1,6 +1,6 @@
 use crate::AppState;
-use serde::Serialize;
 use rusqlite::params;
+use serde::Serialize;
 
 #[derive(Serialize)]
 pub struct User {
@@ -24,6 +24,7 @@ pub struct TimeLog {
 pub struct DashboardStats {
     pub today_first_in: Option<String>,
     pub target_leave_time: String,
+    pub standard_leave_time: String,
     pub monthly_balance_seconds: i64,     // W sekundach
     pub today_private_break_seconds: i64, // W sekundach
     pub daily_target_seconds: i64,        // W sekundach
@@ -44,20 +45,30 @@ pub struct AbsenceLog {
 #[tauri::command]
 pub fn check_auto_login(state: tauri::State<AppState>) -> Result<Option<User>, String> {
     let db = state.db.lock().map_err(|_| "Błąd blokady bazy danych")?;
-    
-    let active_user_id: Option<String> = db.query_row(
-        "SELECT value FROM settings WHERE key = 'active_user_id'",
-        [],
-        |r| r.get(0),
-    ).ok();
+
+    let active_user_id: Option<String> = db
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'active_user_id'",
+            [],
+            |r| r.get(0),
+        )
+        .ok();
 
     if let Some(user_id_str) = active_user_id {
         if let Ok(user_id) = user_id_str.parse::<i32>() {
-            let user = db.query_row(
-                "SELECT id, username, role FROM users WHERE id = ?",
-                [user_id],
-                |r| Ok(User { id: r.get(0)?, username: r.get(1)?, role: r.get(2)? }),
-            ).ok();
+            let user = db
+                .query_row(
+                    "SELECT id, username, role FROM users WHERE id = ?",
+                    [user_id],
+                    |r| {
+                        Ok(User {
+                            id: r.get(0)?,
+                            username: r.get(1)?,
+                            role: r.get(2)?,
+                        })
+                    },
+                )
+                .ok();
             return Ok(user);
         }
     }
@@ -67,19 +78,27 @@ pub fn check_auto_login(state: tauri::State<AppState>) -> Result<Option<User>, S
 
 #[tauri::command]
 pub fn login(
-    username: String, 
-    password: String, 
-    remember_me: bool, 
-    state: tauri::State<AppState>
+    username: String,
+    password: String,
+    remember_me: bool,
+    state: tauri::State<AppState>,
 ) -> Result<User, String> {
     let db = state.db.lock().map_err(|_| "Błąd blokady bazy danych")?;
     let pass_hash = format!("{:x}", md5::compute(password));
 
-    let user = db.query_row(
-        "SELECT id, username, role FROM users WHERE username = ? AND password_hash = ?",
-        [&username, &pass_hash],
-        |r| Ok(User { id: r.get(0)?, username: r.get(1)?, role: r.get(2)? }),
-    ).map_err(|_| "Niepoprawny login lub hasło".to_string())?;
+    let user = db
+        .query_row(
+            "SELECT id, username, role FROM users WHERE username = ? AND password_hash = ?",
+            [&username, &pass_hash],
+            |r| {
+                Ok(User {
+                    id: r.get(0)?,
+                    username: r.get(1)?,
+                    role: r.get(2)?,
+                })
+            },
+        )
+        .map_err(|_| "Niepoprawny login lub hasło".to_string())?;
 
     if remember_me {
         let _ = db.execute(
@@ -102,10 +121,10 @@ pub fn logout(state: tauri::State<AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn create_user(
-    username: String, 
-    password: String, 
-    role: String, 
-    state: tauri::State<AppState>
+    username: String,
+    password: String,
+    role: String,
+    state: tauri::State<AppState>,
 ) -> Result<String, String> {
     let db = state.db.lock().map_err(|_| "Błąd blokady bazy danych")?;
     let pass_hash = format!("{:x}", md5::compute(password));
@@ -113,7 +132,8 @@ pub fn create_user(
     db.execute(
         "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
         [&username, &pass_hash, &role],
-    ).map_err(|e| format!("Nie udało się utworzyć użytkownika: {}", e))?;
+    )
+    .map_err(|e| format!("Nie udało się utworzyć użytkownika: {}", e))?;
 
     Ok(format!("Utworzono użytkownika {}", username))
 }
@@ -123,7 +143,11 @@ pub fn create_user(
 // ==========================================
 
 #[tauri::command]
-pub fn clock_in(user_id: i32, event_type: String, state: tauri::State<AppState>) -> Result<String, String> {
+pub fn clock_in(
+    user_id: i32,
+    event_type: String,
+    state: tauri::State<AppState>,
+) -> Result<String, String> {
     let db = state.db.lock().map_err(|_| "Błąd blokady bazy danych")?;
     let now = crate::time_calc::current_timestamp();
     let date = crate::time_calc::current_date();
@@ -149,7 +173,8 @@ pub fn clock_in(user_id: i32, event_type: String, state: tauri::State<AppState>)
     db.execute(
         "INSERT INTO time_log (user_id, date, time_in, event_type) VALUES (?, ?, ?, ?)",
         params![user_id, date, now, event_type],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     let msg = match event_type.as_str() {
         "work" => "Rozpoczęto pracę",
@@ -172,7 +197,8 @@ pub fn return_to_work(user_id: i32, state: tauri::State<AppState>) -> Result<Str
     db.execute(
         "INSERT INTO time_log (user_id, date, time_in, event_type) VALUES (?, ?, ?, 'work')",
         params![user_id, date, now],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(format!("Zarejestrowano powrót do pracy o {}", now))
 }
@@ -187,12 +213,19 @@ pub fn clock_out(user_id: i32, state: tauri::State<AppState>) -> Result<String, 
     Ok(format!("Zakończono pracę o {}", now))
 }
 
-fn clock_out_internal(db: &rusqlite::Connection, user_id: i32, date: &str, now: &str) -> Result<(), String> {
+fn clock_out_internal(
+    db: &rusqlite::Connection,
+    user_id: i32,
+    date: &str,
+    now: &str,
+) -> Result<(), String> {
     let mut stmt = db.prepare(
         "SELECT id, time_in FROM time_log WHERE user_id = ? AND date = ? AND time_out IS NULL ORDER BY id DESC LIMIT 1"
     ).map_err(|e| e.to_string())?;
 
-    let row = stmt.query_row(rusqlite::params![user_id, date], |r| Ok((r.get::<_, i32>(0)?, r.get::<_, String>(1)?)));
+    let row = stmt.query_row(rusqlite::params![user_id, date], |r| {
+        Ok((r.get::<_, i32>(0)?, r.get::<_, String>(1)?))
+    });
 
     if let Ok((id, time_in)) = row {
         let duration = crate::time_calc::calculate_duration_seconds(&time_in, now);
@@ -200,7 +233,8 @@ fn clock_out_internal(db: &rusqlite::Connection, user_id: i32, date: &str, now: 
         db.execute(
             "UPDATE time_log SET time_out = ?, duration_seconds = ? WHERE id = ?",
             rusqlite::params![now, duration, id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     } else {
         Err("Brak aktywnej sesji!".into())
@@ -209,63 +243,85 @@ fn clock_out_internal(db: &rusqlite::Connection, user_id: i32, date: &str, now: 
 
 // ZMIANA: Pobieranie logów przefiltrowanych po Roku i Miesiącu (np. year = 2026, month = 7)
 #[tauri::command]
-pub fn get_logs(user_id: i32, year: i32, month: i32, state: tauri::State<AppState>) -> Result<Vec<TimeLog>, String> {
+pub fn get_logs(
+    user_id: i32,
+    year: i32,
+    month: i32,
+    state: tauri::State<AppState>,
+) -> Result<Vec<TimeLog>, String> {
     let db = state.db.lock().map_err(|_| "Błąd blokady bazy danych")?;
-    
+
     let month_pattern = format!("{:04}-{:02}-%", year, month);
 
-    let mut stmt = db.prepare(
-        "SELECT id, user_id, date, time_in, time_out, duration_seconds, event_type 
+    let mut stmt = db
+        .prepare(
+            "SELECT id, user_id, date, time_in, time_out, duration_seconds, event_type 
          FROM time_log 
          WHERE user_id = ? AND date LIKE ? 
-         ORDER BY date DESC, time_in DESC"
-    ).map_err(|e| e.to_string())?;
+         ORDER BY date DESC, time_in DESC",
+        )
+        .map_err(|e| e.to_string())?;
 
-    let logs = stmt.query_map(rusqlite::params![user_id, month_pattern], |row| {
-        Ok(TimeLog {
-            id: row.get(0)?,
-            user_id: row.get(1)?,
-            date: row.get(2)?,
-            time_in: row.get(3)?,
-            time_out: row.get(4)?,
-            duration_seconds: row.get(5)?,
-            event_type: row.get(6)?,
+    let logs = stmt
+        .query_map(rusqlite::params![user_id, month_pattern], |row| {
+            Ok(TimeLog {
+                id: row.get(0)?,
+                user_id: row.get(1)?,
+                date: row.get(2)?,
+                time_in: row.get(3)?,
+                time_out: row.get(4)?,
+                duration_seconds: row.get(5)?,
+                event_type: row.get(6)?,
+            })
         })
-    }).map_err(|e| e.to_string())?
-    .filter_map(|r| r.ok())
-    .collect();
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
 
     Ok(logs)
 }
 
 // ZMIANA: Statystyki liczone PRECYZYJNIE dla wybranego miesiąca i roku
 #[tauri::command]
-pub fn get_dashboard_stats(user_id: i32, year: i32, month: i32, state: tauri::State<AppState>) -> Result<DashboardStats, String> {
+pub fn get_dashboard_stats(
+    user_id: i32,
+    year: i32,
+    month: i32,
+    state: tauri::State<AppState>,
+) -> Result<DashboardStats, String> {
     let db = state.db.lock().map_err(|_| "Błąd bazy")?;
     let today = crate::time_calc::current_date();
 
     let target_month_pattern = format!("{:04}-{:02}-%", year, month);
 
     // 1. Norma dzienna w sekundach (np. 8h = 28800 s)
-    let daily_target_seconds: i64 = db.query_row(
-        "SELECT value FROM settings WHERE key = 'daily_target_seconds'",
-        [],
-        |r| r.get::<_, String>(0),
-    ).unwrap_or_else(|_| "28800".to_string()).parse().unwrap_or(28800);
+    let daily_target_seconds: i64 = db
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'daily_target_seconds'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .unwrap_or_else(|_| "28800".to_string())
+        .parse()
+        .unwrap_or(28800);
 
     // 2. Pierwsze wejście dzisiaj i przerwy prywatne dzisiaj
-    let today_first_in: Option<String> = db.query_row(
-        "SELECT time_in FROM time_log WHERE user_id = ? AND date = ? ORDER BY id ASC LIMIT 1",
-        rusqlite::params![user_id, today],
-        |r| r.get(0),
-    ).ok();
+    let today_first_in: Option<String> = db
+        .query_row(
+            "SELECT time_in FROM time_log WHERE user_id = ? AND date = ? ORDER BY id ASC LIMIT 1",
+            rusqlite::params![user_id, today],
+            |r| r.get(0),
+        )
+        .ok();
 
-    let today_private_break_seconds: i64 = db.query_row(
-        "SELECT COALESCE(SUM(duration_seconds), 0) FROM time_log 
+    let today_private_break_seconds: i64 = db
+        .query_row(
+            "SELECT COALESCE(SUM(duration_seconds), 0) FROM time_log 
          WHERE user_id = ? AND date = ? AND event_type = 'break_private'",
-        rusqlite::params![user_id, today],
-        |r| r.get(0),
-    ).unwrap_or(0);
+            rusqlite::params![user_id, today],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
 
     // 3. LICZENIE SALDA DLA KAŻDEGO DNIA Z AKTYWNOŚCIĄ W WYBRANYM MIESIĄCU
     // Pobieramy sumę sekund przepracowanych w poszczególne dni
@@ -275,9 +331,12 @@ pub fn get_dashboard_stats(user_id: i32, year: i32, month: i32, state: tauri::St
          GROUP BY date"
     ).map_err(|e| e.to_string())?;
 
-    let daily_totals = stmt.query_map(rusqlite::params![user_id, target_month_pattern, today], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-    }).map_err(|e| e.to_string())?;
+    let daily_totals = stmt
+        .query_map(
+            rusqlite::params![user_id, target_month_pattern, today],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
 
     let mut monthly_balance_seconds: i64 = 0;
 
@@ -301,9 +360,20 @@ pub fn get_dashboard_stats(user_id: i32, year: i32, month: i32, state: tauri::St
         "---".to_string()
     };
 
+    let standard_leave_time = if let Some(ref first_in) = today_first_in {
+        crate::time_calc::calculate_standard_leave_time(
+            first_in,
+            daily_target_seconds,
+            today_private_break_seconds,
+        )
+    } else {
+        "---".to_string()
+    };
+
     Ok(DashboardStats {
         today_first_in,
         target_leave_time,
+        standard_leave_time,
         monthly_balance_seconds,
         today_private_break_seconds,
         daily_target_seconds,
@@ -329,7 +399,10 @@ pub fn add_manual_log(
     let full_time_out = time_out.as_ref().map(|t| format!("{} {}", date, t));
 
     let duration_seconds = if let Some(ref out_time) = full_time_out {
-        Some(crate::time_calc::calculate_duration_seconds(&full_time_in, out_time))
+        Some(crate::time_calc::calculate_duration_seconds(
+            &full_time_in,
+            out_time,
+        ))
     } else {
         None
     };
@@ -337,8 +410,16 @@ pub fn add_manual_log(
     db.execute(
         "INSERT INTO time_log (user_id, date, time_in, time_out, duration_seconds, event_type) 
          VALUES (?, ?, ?, ?, ?, ?)",
-        rusqlite::params![user_id, date, full_time_in, full_time_out, duration_seconds, event_type],
-    ).map_err(|e| format!("Błąd dodawania wpisu: {}", e))?;
+        rusqlite::params![
+            user_id,
+            date,
+            full_time_in,
+            full_time_out,
+            duration_seconds,
+            event_type
+        ],
+    )
+    .map_err(|e| format!("Błąd dodawania wpisu: {}", e))?;
 
     Ok("Pomyślnie dodano nowy wpis".into())
 }
@@ -356,10 +437,16 @@ pub fn update_log(
     let db = state.db.lock().map_err(|_| "Błąd bazy")?;
 
     let full_time_in = format!("{} {}", date, time_in);
-    let full_time_out = time_out.as_ref().filter(|t| !t.is_empty()).map(|t| format!("{} {}", date, t));
+    let full_time_out = time_out
+        .as_ref()
+        .filter(|t| !t.is_empty())
+        .map(|t| format!("{} {}", date, t));
 
     let duration_seconds = if let Some(ref out_time) = full_time_out {
-        Some(crate::time_calc::calculate_duration_seconds(&full_time_in, out_time))
+        Some(crate::time_calc::calculate_duration_seconds(
+            &full_time_in,
+            out_time,
+        ))
     } else {
         None
     };
@@ -393,24 +480,30 @@ pub fn delete_log(log_id: i32, state: tauri::State<AppState>) -> Result<String, 
 pub fn get_daily_target_seconds(state: tauri::State<AppState>) -> Result<i64, String> {
     let db = state.db.lock().map_err(|_| "Błąd bazy")?;
 
-    let seconds_str: String = db.query_row(
-        "SELECT value FROM settings WHERE key = 'daily_target_seconds'",
-        [],
-        |r| r.get(0),
-    ).unwrap_or_else(|_| "28800".to_string());
+    let seconds_str: String = db
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'daily_target_seconds'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|_| "28800".to_string());
 
     Ok(seconds_str.parse().unwrap_or(28800))
 }
 
 // Zapisywanie nowej normy dziennej
 #[tauri::command]
-pub fn set_daily_target_seconds(seconds: i64, state: tauri::State<AppState>) -> Result<String, String> {
+pub fn set_daily_target_seconds(
+    seconds: i64,
+    state: tauri::State<AppState>,
+) -> Result<String, String> {
     let db = state.db.lock().map_err(|_| "Błąd bazy")?;
 
     db.execute(
         "INSERT OR REPLACE INTO settings (key, value) VALUES ('daily_target_seconds', ?)",
         [seconds.to_string()],
-    ).map_err(|e| format!("Błąd zapisu ustawień: {}", e))?;
+    )
+    .map_err(|e| format!("Błąd zapisu ustawień: {}", e))?;
 
     Ok("Zapisano nową normę czasową".into())
 }
@@ -429,8 +522,10 @@ pub fn add_absence(
 ) -> Result<String, String> {
     let db = state.db.lock().map_err(|_| "Błąd bazy")?;
 
-    let start = chrono::NaiveDate::parse_from_str(&start_date, "%Y-%m-%d").map_err(|e| e.to_string())?;
-    let end = chrono::NaiveDate::parse_from_str(&end_date, "%Y-%m-%d").map_err(|e| e.to_string())?;
+    let start =
+        chrono::NaiveDate::parse_from_str(&start_date, "%Y-%m-%d").map_err(|e| e.to_string())?;
+    let end =
+        chrono::NaiveDate::parse_from_str(&end_date, "%Y-%m-%d").map_err(|e| e.to_string())?;
 
     if end < start {
         return Err("Data końcowa nie może być wcześniejsza niż początkowa!".into());
@@ -439,7 +534,7 @@ pub fn add_absence(
     let mut current = start;
     while current <= end {
         let date_str = current.format("%Y-%m-%d").to_string();
-        
+
         // Zapisujemy nieobecność (ignorujemy jeśli wpis na ten dzień już istnieje)
         let _ = db.execute(
             "INSERT OR IGNORE INTO absence_log (user_id, date, absence_type) VALUES (?, ?, ?)",
@@ -453,23 +548,28 @@ pub fn add_absence(
 }
 
 #[tauri::command]
-pub fn get_absences(user_id: i32, state: tauri::State<AppState>) -> Result<Vec<AbsenceLog>, String> {
+pub fn get_absences(
+    user_id: i32,
+    state: tauri::State<AppState>,
+) -> Result<Vec<AbsenceLog>, String> {
     let db = state.db.lock().map_err(|_| "Błąd bazy")?;
 
     let mut stmt = db.prepare(
         "SELECT id, user_id, date, absence_type FROM absence_log WHERE user_id = ? ORDER BY date DESC"
     ).map_err(|e| e.to_string())?;
 
-    let absences = stmt.query_map([user_id], |row| {
-        Ok(AbsenceLog {
-            id: row.get(0)?,
-            user_id: row.get(1)?,
-            date: row.get(2)?,
-            absence_type: row.get(3)?,
+    let absences = stmt
+        .query_map([user_id], |row| {
+            Ok(AbsenceLog {
+                id: row.get(0)?,
+                user_id: row.get(1)?,
+                date: row.get(2)?,
+                absence_type: row.get(3)?,
+            })
         })
-    }).map_err(|e| e.to_string())?
-    .filter_map(|r| r.ok())
-    .collect();
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
 
     Ok(absences)
 }
@@ -490,7 +590,11 @@ pub fn delete_absence(absence_id: i32, state: tauri::State<AppState>) -> Result<
 
 // IMPORT CSV
 #[tauri::command]
-pub fn import_csv_data(user_id: i32, csv_content: String, state: tauri::State<AppState>) -> Result<String, String> {
+pub fn import_csv_data(
+    user_id: i32,
+    csv_content: String,
+    state: tauri::State<AppState>,
+) -> Result<String, String> {
     let db = state.db.lock().map_err(|_| "Błąd bazy")?;
 
     let mut lines = csv_content.lines().peekable();
@@ -513,7 +617,9 @@ pub fn import_csv_data(user_id: i32, csv_content: String, state: tauri::State<Ap
 
         if action == "IN" {
             // Jeśli mieliśmy wcześniej wiszący "IN" bez "OUT", zapisujemy go jako otwartą sesję
-            if let (Some(prev_date), Some(prev_time)) = (current_in_date.take(), current_in_time.take()) {
+            if let (Some(prev_date), Some(prev_time)) =
+                (current_in_date.take(), current_in_time.take())
+            {
                 let prev_timestamp = format!("{} {}", prev_date, prev_time);
                 let _ = db.execute(
                     "INSERT INTO time_log (user_id, date, time_in, event_type) VALUES (?, ?, ?, 'work')",
@@ -525,9 +631,11 @@ pub fn import_csv_data(user_id: i32, csv_content: String, state: tauri::State<Ap
             current_in_date = Some(date.to_string());
             current_in_time = Some(time.to_string());
         } else if action == "OUT" {
-            if let (Some(in_date), Some(in_time)) = (current_in_date.take(), current_in_time.take()) {
+            if let (Some(in_date), Some(in_time)) = (current_in_date.take(), current_in_time.take())
+            {
                 let full_in = format!("{} {}", in_date, in_time);
-                let duration = crate::time_calc::calculate_duration_seconds(&full_in, &full_timestamp);
+                let duration =
+                    crate::time_calc::calculate_duration_seconds(&full_in, &full_timestamp);
 
                 let _ = db.execute(
                     "INSERT INTO time_log (user_id, date, time_in, time_out, duration_seconds, event_type) 
@@ -549,7 +657,10 @@ pub fn import_csv_data(user_id: i32, csv_content: String, state: tauri::State<Ap
         imported_count += 1;
     }
 
-    Ok(format!("Pomyślnie zaimportowano {} sesji z pliku CSV!", imported_count))
+    Ok(format!(
+        "Pomyślnie zaimportowano {} sesji z pliku CSV!",
+        imported_count
+    ))
 }
 
 // EKSPORT CSV
@@ -557,18 +668,22 @@ pub fn import_csv_data(user_id: i32, csv_content: String, state: tauri::State<Ap
 pub fn export_csv_data(user_id: i32, state: tauri::State<AppState>) -> Result<String, String> {
     let db = state.db.lock().map_err(|_| "Błąd bazy")?;
 
-    let mut stmt = db.prepare(
-        "SELECT date, time_in, time_out FROM time_log 
-         WHERE user_id = ? AND event_type = 'work' ORDER BY id ASC"
-    ).map_err(|e| e.to_string())?;
+    let mut stmt = db
+        .prepare(
+            "SELECT date, time_in, time_out FROM time_log 
+         WHERE user_id = ? AND event_type = 'work' ORDER BY id ASC",
+        )
+        .map_err(|e| e.to_string())?;
 
-    let rows = stmt.query_map([user_id], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, Option<String>>(2)?,
-        ))
-    }).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([user_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
 
     let mut csv_lines = Vec::new();
 
@@ -578,7 +693,11 @@ pub fn export_csv_data(user_id: i32, state: tauri::State<AppState>) -> Result<St
         csv_lines.push(format!("{},{},IN", date, time_in));
 
         if let Some(time_out_full) = r.2 {
-            let time_out = time_out_full.split(' ').nth(1).unwrap_or(&time_out_full).to_string();
+            let time_out = time_out_full
+                .split(' ')
+                .nth(1)
+                .unwrap_or(&time_out_full)
+                .to_string();
             csv_lines.push(format!("{},{},OUT", date, time_out));
         }
     }
@@ -590,18 +709,21 @@ pub fn export_csv_data(user_id: i32, state: tauri::State<AppState>) -> Result<St
 pub fn get_all_users(state: tauri::State<AppState>) -> Result<Vec<User>, String> {
     let db = state.db.lock().map_err(|_| "Błąd bazy")?;
 
-    let mut stmt = db.prepare("SELECT id, username, role FROM users ORDER BY username ASC")
+    let mut stmt = db
+        .prepare("SELECT id, username, role FROM users ORDER BY username ASC")
         .map_err(|e| e.to_string())?;
 
-    let users = stmt.query_map([], |row| {
-        Ok(User {
-            id: row.get(0)?,
-            username: row.get(1)?,
-            role: row.get(2)?,
+    let users = stmt
+        .query_map([], |row| {
+            Ok(User {
+                id: row.get(0)?,
+                username: row.get(1)?,
+                role: row.get(2)?,
+            })
         })
-    }).map_err(|e| e.to_string())?
-    .filter_map(|r| r.ok())
-    .collect();
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
 
     Ok(users)
 }

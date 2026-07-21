@@ -62,10 +62,11 @@
           <span style="font-size: 0.85em; color: #a6adc8;">Wejście dzisiaj</span>
           <h2 id="stat-first-in" style="margin: 5px 0 0 0; color: #89b4fa;">--:--</h2>
         </div>
-        <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
-          <span style="font-size: 0.85em; color: #a6adc8;">Wyjście "Na Zero"</span>
-          <h2 id="stat-target-leave" style="margin: 5px 0 0 0; color: #a6e3a1;">--:--</h2>
-        </div>
+        <!-- Znajdź dotychczasową kartę odpowiadającą za godzinę wyjścia i zamień ją na to: -->
+      <div class="card stat-card" id="card-toggle-leave" style="cursor: pointer; user-select: none;" title="Kliknij, aby przełączyć tryb wyjścia">
+        <small id="stat-leave-label" style="color: var(--subtext-color);">Wyjście (Na Zero) 🔄</small>
+        <h2 id="stat-target-leave">--:--</h2>
+      </div>
         <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
           <span style="font-size: 0.85em; color: #a6adc8;">Saldo Miesięczne</span>
           <h2 id="stat-balance" style="margin: 5px 0 0 0;">0 min</h2>
