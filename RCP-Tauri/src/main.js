@@ -1,14 +1,18 @@
 const { invoke } = window.__TAURI__.core;
 
-// Elementy ekranowe i nawigacja
+// 1. Elementy ekranowe i nawigacja
 const loginScreen = document.getElementById('login-screen');
 const appScreen = document.getElementById('app-screen');
+
 const navDashboard = document.getElementById('nav-dashboard');
 const navReports = document.getElementById('nav-reports');
 const navSettings = document.getElementById('nav-settings');
+const navAbsences = document.getElementById('nav-absences'); // <-- DODANE
+
 const viewDashboard = document.getElementById('view-dashboard');
 const viewReports = document.getElementById('view-reports');
 const viewSettings = document.getElementById('view-settings');
+const viewAbsences = document.getElementById('view-absences'); // <-- DODANE
 
 // Logowanie i użytkownik
 const loginForm = document.getElementById('login-form');
@@ -52,6 +56,14 @@ const newPassword = document.getElementById('new-password');
 const newRole = document.getElementById('new-role');
 const createUserMsg = document.getElementById('create-user-msg');
 
+// Elementy Urlopów / L4
+const formAddAbsence = document.getElementById('form-add-absence');
+const absenceStart = document.getElementById('absence-start');
+const absenceEnd = document.getElementById('absence-end');
+const absenceType = document.getElementById('absence-type');
+const absenceMsg = document.getElementById('absence-msg');
+const absencesTableBody = document.getElementById('absences-table-body');
+
 let currentUser = null;
 
 const eventLabels = {
@@ -60,7 +72,13 @@ const eventLabels = {
   'business': 'Wyjście służbowe'
 };
 
-// 1. Sprawdzanie auto-loginu przy starcie
+const absenceLabels = {
+  'vacation': 'Urlop Wypoczynkowy',
+  'sick_leave': 'Zwolnienie Lekarskie (L4)',
+  'other': 'Inna Nieobecność'
+};
+
+// 2. Inicjalizacja Aplikacji i Sesji
 async function initApp() {
   try {
     const user = await invoke('check_auto_login');
@@ -85,7 +103,6 @@ function showAppScreen() {
   appScreen.style.display = 'block';
   userInfo.textContent = `Zalogowany: ${currentUser.username} (${currentUser.role})`;
   
-  // Pokazujemy panel kont tylko dla Admina
   if (currentUser.role === 'admin') {
     adminUserPanel.style.display = 'block';
   } else {
@@ -95,28 +112,33 @@ function showAppScreen() {
   switchTab('dashboard');
 }
 
-// 2. Nawigacja po zakładkach
+// 3. Obsługa Przełączania Zakładek
 navDashboard.addEventListener('click', () => switchTab('dashboard'));
 navReports.addEventListener('click', () => switchTab('reports'));
 navSettings.addEventListener('click', () => switchTab('settings'));
+if (navAbsences) navAbsences.addEventListener('click', () => switchTab('absences'));
 
 function switchTab(tab) {
   viewDashboard.style.display = tab === 'dashboard' ? 'block' : 'none';
   viewReports.style.display = tab === 'reports' ? 'block' : 'none';
   viewSettings.style.display = tab === 'settings' ? 'block' : 'none';
+  if (viewAbsences) viewAbsences.style.display = tab === 'absences' ? 'block' : 'none';
 
   navDashboard.classList.toggle('active', tab === 'dashboard');
   navReports.classList.toggle('active', tab === 'reports');
   navSettings.classList.toggle('active', tab === 'settings');
+  if (navAbsences) navAbsences.classList.toggle('active', tab === 'absences');
 
   if (tab === 'settings') {
     loadSettings();
+  } else if (tab === 'absences') {
+    loadAbsences();
   } else {
     updateUI();
   }
 }
 
-// 3. Logowanie i Wylogowanie
+// 4. Logowanie i Wylogowanie
 loginForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   loginError.textContent = "";
@@ -139,7 +161,7 @@ btnLogout.addEventListener('click', async () => {
   showLoginScreen();
 });
 
-// Formatowanie sekund
+// Formatowanie sekund do hh:mm:ss
 function formatSeconds(totalSeconds, includeSign = true) {
   const sign = totalSeconds < 0 ? "-" : (includeSign ? "+" : "");
   const absSec = Math.abs(totalSeconds);
@@ -149,7 +171,7 @@ function formatSeconds(totalSeconds, includeSign = true) {
   return `${sign}${hours}h ${minutes}m ${seconds}s`;
 }
 
-// 4. Aktualizacja UI
+// 5. Odświeżanie Dashboardu i Tabeli Logów
 async function updateUI() {
   if (!currentUser) return;
 
@@ -215,7 +237,64 @@ async function updateUI() {
   }
 }
 
-// 5. Obsługa Ustawień i Tworzenia Użytkowników
+// 6. Obsługa Urlopów i Nieobecności
+async function loadAbsences() {
+  if (!currentUser) return;
+  try {
+    const list = await invoke('get_absences', { userId: currentUser.id });
+    if (absencesTableBody) {
+      absencesTableBody.innerHTML = list.map(item => `
+        <tr>
+          <td>${item.id}</td>
+          <td>${item.date}</td>
+          <td><b>${absenceLabels[item.absence_type] || item.absence_type}</b></td>
+          <td>
+            <button onclick="deleteAbsenceEntry(${item.id})" style="padding: 2px 6px; background: #f38ba8; color: #11111b; border: none; border-radius: 3px; cursor: pointer;">Usuń</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+  } catch (err) {
+    console.error("Błąd ładowania absencji:", err);
+  }
+}
+
+if (formAddAbsence) {
+  formAddAbsence.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (absenceMsg) absenceMsg.textContent = "";
+
+    try {
+      const res = await invoke('add_absence', {
+        userId: currentUser.id,
+        startDate: absenceStart.value,
+        endDate: absenceEnd.value,
+        absenceType: absenceType.value
+      });
+      if (absenceMsg) {
+        absenceMsg.style.color = "#a6e3a1";
+        absenceMsg.textContent = res;
+      }
+      await loadAbsences();
+    } catch (err) {
+      if (absenceMsg) {
+        absenceMsg.style.color = "#f38ba8";
+        absenceMsg.textContent = "Błąd: " + err;
+      }
+    }
+  });
+}
+
+window.deleteAbsenceEntry = async (id) => {
+  if (confirm("Czy na pewno chcesz usunąć tę nieobecność?")) {
+    try {
+      await invoke('delete_absence', { absenceId: id });
+      await loadAbsences();
+    } catch (e) { alert(e); }
+  }
+};
+
+// 7. Obsługa Ustawień
 async function loadSettings() {
   try {
     const totalSeconds = await invoke('get_daily_target_seconds');
@@ -229,7 +308,6 @@ async function loadSettings() {
 formSettingsTarget.addEventListener('submit', async (e) => {
   e.preventDefault();
   targetMsg.textContent = "";
-  
   const h = parseInt(targetHours.value) || 0;
   const m = parseInt(targetMinutes.value) || 0;
   const totalSec = (h * 3600) + (m * 60);
@@ -261,7 +339,7 @@ formCreateUser.addEventListener('submit', async (e) => {
   }
 });
 
-// Globalne funkcje wywoływane z tabeli
+// Modale i Formularze
 window.openEditModal = (id, date, timeIn, timeOut, eventType) => {
   dialogTitle.textContent = "Edycja Wpisu #" + id;
   editId.value = id;
@@ -281,7 +359,6 @@ window.deleteLogEntry = async (id) => {
   }
 };
 
-// Modale i Formularze
 btnAddManual.addEventListener('click', () => {
   dialogTitle.textContent = "Dodaj Zapomniany Wpis";
   editId.value = "";
@@ -321,7 +398,7 @@ editForm.addEventListener('submit', async (e) => {
   }
 });
 
-// Przyciski RCP
+// Rejestracja Czasu Pracy
 btnStart.addEventListener('click', async () => {
   try {
     statusMsg.textContent = await invoke('clock_in', { userId: currentUser.id, eventType: 'work' });
@@ -357,5 +434,54 @@ btnStop.addEventListener('click', async () => {
   } catch (e) { statusMsg.textContent = e; }
 });
 
-// Inicjalizacja
+// Obsługa Eksportu CSV
+document.getElementById('btn-export-csv').addEventListener('click', async () => {
+  const csvMsg = document.getElementById('csv-msg');
+  try {
+    const csvContent = await invoke('export_csv_data', { userId: currentUser.id });
+    
+    // Pobranie pliku przez przeglądarkę
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `rcp_export_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    csvMsg.style.color = "#a6e3a1";
+    csvMsg.textContent = "Wygenerowano plik CSV!";
+  } catch (err) {
+    csvMsg.style.color = "#f38ba8";
+    csvMsg.textContent = "Błąd eksportu: " + err;
+  }
+});
+
+// Obsługa Importu CSV
+document.getElementById('input-import-csv').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  const csvMsg = document.getElementById('csv-msg');
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async (event) => {
+    try {
+      const content = event.target.result;
+      const res = await invoke('import_csv_data', {
+        userId: currentUser.id,
+        csvContent: content
+      });
+      csvMsg.style.color = "#a6e3a1";
+      csvMsg.textContent = res;
+      await updateUI();
+    } catch (err) {
+      csvMsg.style.color = "#f38ba8";
+      csvMsg.textContent = "Błąd importu: " + err;
+    }
+  };
+  reader.readAsText(file);
+});
+
+// Start
 initApp();

@@ -36,10 +36,15 @@ pub fn run() {
             commands::get_logs,
             commands::get_dashboard_stats,
             commands::add_manual_log,
-            commands::update_log,     
+            commands::update_log,
             commands::delete_log,
             commands::get_daily_target_seconds,
-            commands::set_daily_target_seconds    
+            commands::set_daily_target_seconds,
+            commands::add_absence,
+            commands::get_absences,
+            commands::delete_absence,
+            commands::import_csv_data,
+            commands::export_csv_data
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -29,6 +29,14 @@ pub struct DashboardStats {
     pub daily_target_seconds: i64,        // W sekundach
 }
 
+#[derive(Serialize)]
+pub struct AbsenceLog {
+    pub id: i32,
+    pub user_id: i32,
+    pub date: String,
+    pub absence_type: String,
+}
+
 // ==========================================
 // 1. SYSTEM AUTORYZACJI I SESJI (KROK 2)
 // ==========================================
@@ -254,7 +262,7 @@ pub fn get_dashboard_stats(user_id: i32, state: tauri::State<AppState>) -> Resul
         |r| r.get(0),
     ).unwrap_or(0);
 
-    // 4. Saldo z poprzednich dni miesiąca (w sekundach)
+    // 4. Saldo ze WSZYSTKICH DNI bieżącego miesiąca (włącznie z dzisiaj)
     let mut stmt = db.prepare(
         "SELECT date, SUM(duration_seconds) FROM time_log 
          WHERE user_id = ? AND date >= ? AND date <= ? AND event_type IN ('work', 'business') AND duration_seconds IS NOT NULL
@@ -270,7 +278,17 @@ pub fn get_dashboard_stats(user_id: i32, state: tauri::State<AppState>) -> Resul
         previous_days_balance_seconds += day.1 - daily_target_seconds;
     }
 
-    // 5. Godzina wyjścia na zero
+    // 5. DODATKOWO: Dni absencji w tym miesiącu (Urlop / L4) zerują minus dla danego dnia!
+    let absence_count: i64 = db.query_row(
+        "SELECT COUNT(*) FROM absence_log WHERE user_id = ? AND date >= ? AND date <= ?",
+        rusqlite::params![user_id, month_start, today],
+        |r| r.get(0),
+    ).unwrap_or(0);
+
+    // Za każdy dzień absencji doliczamy brakujące godziny do bilansu
+    previous_days_balance_seconds += absence_count * daily_target_seconds;
+
+    // 6. Godzina wyjścia na zero
     let target_leave_time = if let Some(ref first_in) = today_first_in {
         crate::time_calc::calculate_target_leave_time(
             first_in,
@@ -395,4 +413,175 @@ pub fn set_daily_target_seconds(seconds: i64, state: tauri::State<AppState>) -> 
     ).map_err(|e| format!("Błąd zapisu ustawień: {}", e))?;
 
     Ok("Zapisano nową normę czasową".into())
+}
+
+// ==========================================
+// 5. MODUŁ URLOPÓW I ABSENCJI (KROK 6)
+// ==========================================
+
+#[tauri::command]
+pub fn add_absence(
+    user_id: i32,
+    start_date: String,
+    end_date: String,
+    absence_type: String,
+    state: tauri::State<AppState>,
+) -> Result<String, String> {
+    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+
+    let start = chrono::NaiveDate::parse_from_str(&start_date, "%Y-%m-%d").map_err(|e| e.to_string())?;
+    let end = chrono::NaiveDate::parse_from_str(&end_date, "%Y-%m-%d").map_err(|e| e.to_string())?;
+
+    if end < start {
+        return Err("Data końcowa nie może być wcześniejsza niż początkowa!".into());
+    }
+
+    let mut current = start;
+    while current <= end {
+        let date_str = current.format("%Y-%m-%d").to_string();
+        
+        // Zapisujemy nieobecność (ignorujemy jeśli wpis na ten dzień już istnieje)
+        let _ = db.execute(
+            "INSERT OR IGNORE INTO absence_log (user_id, date, absence_type) VALUES (?, ?, ?)",
+            rusqlite::params![user_id, date_str, absence_type],
+        );
+
+        current += chrono::Duration::days(1);
+    }
+
+    Ok("Dodano nieobecność".into())
+}
+
+#[tauri::command]
+pub fn get_absences(user_id: i32, state: tauri::State<AppState>) -> Result<Vec<AbsenceLog>, String> {
+    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+
+    let mut stmt = db.prepare(
+        "SELECT id, user_id, date, absence_type FROM absence_log WHERE user_id = ? ORDER BY date DESC"
+    ).map_err(|e| e.to_string())?;
+
+    let absences = stmt.query_map([user_id], |row| {
+        Ok(AbsenceLog {
+            id: row.get(0)?,
+            user_id: row.get(1)?,
+            date: row.get(2)?,
+            absence_type: row.get(3)?,
+        })
+    }).map_err(|e| e.to_string())?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    Ok(absences)
+}
+
+#[tauri::command]
+pub fn delete_absence(absence_id: i32, state: tauri::State<AppState>) -> Result<String, String> {
+    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+
+    db.execute("DELETE FROM absence_log WHERE id = ?", [absence_id])
+        .map_err(|e| e.to_string())?;
+
+    Ok("Usunięto nieobecność".into())
+}
+
+// ==========================================
+// 6. IMPORT / EKSPORT CSV (KROK 7)
+// ==========================================
+
+// IMPORT CSV
+#[tauri::command]
+pub fn import_csv_data(user_id: i32, csv_content: String, state: tauri::State<AppState>) -> Result<String, String> {
+    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+
+    let mut lines = csv_content.lines().peekable();
+    let mut imported_count = 0;
+
+    let mut current_in_date: Option<String> = None;
+    let mut current_in_time: Option<String> = None;
+
+    while let Some(line) = lines.next() {
+        let parts: Vec<&str> = line.trim().split(',').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+
+        let date = parts[0].trim();
+        let time = parts[1].trim();
+        let action = parts[2].trim().to_uppercase();
+
+        let full_timestamp = format!("{} {}", date, time);
+
+        if action == "IN" {
+            // Jeśli mieliśmy wcześniej wiszący "IN" bez "OUT", zapisujemy go jako otwartą sesję
+            if let (Some(prev_date), Some(prev_time)) = (current_in_date.take(), current_in_time.take()) {
+                let prev_timestamp = format!("{} {}", prev_date, prev_time);
+                let _ = db.execute(
+                    "INSERT INTO time_log (user_id, date, time_in, event_type) VALUES (?, ?, ?, 'work')",
+                    rusqlite::params![user_id, prev_date, prev_timestamp],
+                );
+                imported_count += 1;
+            }
+
+            current_in_date = Some(date.to_string());
+            current_in_time = Some(time.to_string());
+        } else if action == "OUT" {
+            if let (Some(in_date), Some(in_time)) = (current_in_date.take(), current_in_time.take()) {
+                let full_in = format!("{} {}", in_date, in_time);
+                let duration = crate::time_calc::calculate_duration_seconds(&full_in, &full_timestamp);
+
+                let _ = db.execute(
+                    "INSERT INTO time_log (user_id, date, time_in, time_out, duration_seconds, event_type) 
+                     VALUES (?, ?, ?, ?, ?, 'work')",
+                    rusqlite::params![user_id, in_date, full_in, full_timestamp, duration],
+                );
+                imported_count += 1;
+            }
+        }
+    }
+
+    // Jeśli na końcu pliku pozostał wiszący IN
+    if let (Some(in_date), Some(in_time)) = (current_in_date, current_in_time) {
+        let full_in = format!("{} {}", in_date, in_time);
+        let _ = db.execute(
+            "INSERT INTO time_log (user_id, date, time_in, event_type) VALUES (?, ?, ?, 'work')",
+            rusqlite::params![user_id, in_date, full_in],
+        );
+        imported_count += 1;
+    }
+
+    Ok(format!("Pomyślnie zaimportowano {} sesji z pliku CSV!", imported_count))
+}
+
+// EKSPORT CSV
+#[tauri::command]
+pub fn export_csv_data(user_id: i32, state: tauri::State<AppState>) -> Result<String, String> {
+    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+
+    let mut stmt = db.prepare(
+        "SELECT date, time_in, time_out FROM time_log 
+         WHERE user_id = ? AND event_type = 'work' ORDER BY id ASC"
+    ).map_err(|e| e.to_string())?;
+
+    let rows = stmt.query_map([user_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    }).map_err(|e| e.to_string())?;
+
+    let mut csv_lines = Vec::new();
+
+    for r in rows.filter_map(|r| r.ok()) {
+        let date = r.0;
+        let time_in = r.1.split(' ').nth(1).unwrap_or(&r.1).to_string();
+        csv_lines.push(format!("{},{},IN", date, time_in));
+
+        if let Some(time_out_full) = r.2 {
+            let time_out = time_out_full.split(' ').nth(1).unwrap_or(&time_out_full).to_string();
+            csv_lines.push(format!("{},{},OUT", date, time_out));
+        }
+    }
+
+    Ok(csv_lines.join("\n"))
 }

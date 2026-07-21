@@ -37,6 +37,7 @@
         <button id="nav-dashboard" class="nav-btn active" style="padding: 8px 16px;">Dashboard Dzienny</button>
         <button id="nav-reports" class="nav-btn" style="padding: 8px 16px;">Podsumowanie & Wykresy</button>
         <button id="nav-settings" class="nav-btn" style="padding: 8px 16px;">Ustawienia</button>
+        <button id="nav-absences" class="nav-btn" style="padding: 8px 16px;">Urlopy & L4</button>
       </nav>
       <div>
         <span id="user-info" style="margin-right: 15px; font-weight: bold;"></span>
@@ -83,6 +84,15 @@
         <button id="btn-add-manual" style="padding: 8px 15px; background: #a6e3a1; color: #11111b; font-weight: bold; border: none; border-radius: 4px; cursor: pointer;">+ Dodaj Zapomniany Wpis</button>
       </div>
 
+      <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
+        <button id="btn-export-csv" style="padding: 8px 15px; background: #89b4fa; color: #11111b; font-weight: bold; border: none; border-radius: 4px; cursor: pointer;">Eksportuj do CSV</button>
+
+        <label for="input-import-csv" style="padding: 8px 15px; background: #cba6f7; color: #11111b; font-weight: bold; border-radius: 4px; cursor: pointer;">Importuj z CSV</label>
+        <input type="file" id="input-import-csv" accept=".csv" style="display: none;" />
+
+        <span id="csv-msg" style="margin-left: 10px;"></span>
+      </div>
+
       <table>
         <thead>
           <tr>
@@ -122,6 +132,7 @@
         <p id="target-msg" style="color: #a6e3a1; margin-top: 10px;"></p>
       </div>
 
+
       <!-- Panel Admina: Tworzenie kont (Widoczny tylko dla roli 'admin') -->
       <div id="admin-user-panel" class="card" style="background: #2b2b36; padding: 20px; border-radius: 8px; max-width: 400px; display: none;">
         <h3>Zarządzanie Użytkownikami (Tylko Admin)</h3>
@@ -147,6 +158,54 @@
       </div>
     </section>
   </main>
+
+  <!-- WIDOK 4: URLOPY I L4 -->
+    <section id="view-absences" style="display: none;">
+      <h2>Zgłaszanie Nieobecności (Urlopy / L4)</h2>
+
+      <div style="display: grid; grid-template-columns: 320px 1fr; gap: 20px;">
+        <!-- Formularz dodawania urlopu -->
+        <div class="card" style="background: #2b2b36; padding: 20px; border-radius: 8px; height: fit-content;">
+          <h3>Zgłoś Nieobecność</h3>
+          <form id="form-add-absence">
+            <div style="margin-bottom: 10px;">
+              <label style="display:block;">Data Od:</label>
+              <input type="date" id="absence-start" required style="width: 100%; box-sizing: border-box;" />
+            </div>
+            <div style="margin-bottom: 10px;">
+              <label style="display:block;">Data Do:</label>
+              <input type="date" id="absence-end" required style="width: 100%; box-sizing: border-box;" />
+            </div>
+            <div style="margin-bottom: 15px;">
+              <label style="display:block;">Typ nieobecności:</label>
+              <select id="absence-type" style="width: 100%; box-sizing: border-box; padding: 5px;">
+                <option value="vacation">Urlop Wypoczynkowy</option>
+                <option value="sick_leave">Zwolnienie Lekarskie (L4)</option>
+                <option value="other">Inna Nieobecność</option>
+              </select>
+            </div>
+            <button type="submit" class="btn-green" style="width: 100%; padding: 8px;">Zapisz Nieobecność</button>
+          </form>
+          <p id="absence-msg" style="margin-top: 10px; text-align: center;"></p>
+        </div>
+
+        <!-- Tabela zarejestrowanych absencji -->
+        <div>
+          <h3>Zarejestrowane Nieobecności</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Data</th>
+                <th>Typ Nieobecności</th>
+                <th>Akcje</th>
+              </tr>
+            </thead>
+            <tbody id="absences-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
 
   <!-- MODAL DO EDYCJI / DODAWANIA WPISU -->
   <dialog id="edit-dialog" style="background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-radius: 8px; padding: 20px; width: 320px;">
