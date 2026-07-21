@@ -23,6 +23,7 @@ saveBtn.addEventListener('click', async (event) => {
   try {
     const response = await invoke('add_log', { date: dateValue });
     console.log("Odpowiedź z Rust:", response);
+    await renderLogs();
     statusMsg.textContent = "Zapisano w bazie: " + dateValue;
   } catch (err) {
     console.error("Błąd wywołania IPC:", err);
@@ -39,3 +40,20 @@ async function handleAddLog(){
     console.error("Database error:", err);
   }
 }
+
+async function renderLogs() {
+  const tableBody = document.getElementById('logs-table-body');
+  try {
+    const logs = await invoke('get_logs');
+    tableBody.innerHTML = logs.map(log => `
+      <tr>
+        <td>${log.id}</td>
+        <td>${log.date}</td>
+        <td>${log.time_in}</td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    console.error("Błąd pobierania danych:", err);
+  }
+}
+renderLogs();

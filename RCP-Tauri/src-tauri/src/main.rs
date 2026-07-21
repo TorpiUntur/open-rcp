@@ -5,9 +5,35 @@ use rusqlite::{Connection, Result};
 use std::sync::Mutex;
 use tauri::State;
 use tauri::Manager;
+use serde::Serialize;
 
 struct AppState{
     db: Mutex<Connection>,
+}
+
+#[derive(Serialize)]
+struct TimeLog{
+    id: i32,
+    date: String,
+    time_in: String,
+}
+
+#[tauri::command]
+fn get_logs(state: tauri::State<AppState>) -> Result<Vec<TimeLog>, String>{
+    let db = state.db.lock().map_err(|_| "Mutex error")?;
+    let mut stmt = db.prepare("SELECT id, date, time_in FROM time_log").map_err(|e| e.to_string())?;
+
+    let logs = stmt.query_map([], |row|{
+        Ok(TimeLog{
+            id: row.get(0)?,
+            date: row.get(1)?,
+            time_in: row.get(2)?,
+        })
+    }).map_err(|e| e.to_string())?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    Ok(logs)
 }
 
 
@@ -40,7 +66,7 @@ fn main() {
         app.manage(AppState { db: Mutex::new(conn) });
         Ok(())
         })
-        .invoke_handler(tauri::generate_handler![add_log])
+        .invoke_handler(tauri::generate_handler![add_log, get_logs])
         .run(tauri::generate_context!())
         .expect("error while running tauri app");
 }
