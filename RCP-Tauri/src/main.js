@@ -1,4 +1,4 @@
-const { invoke } = window.__TAURI__.core;
+const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke || window.__TAURI_INVOKE__;
 
 // 1. Elementy ekranowe i nawigacja
 const loginScreen = document.getElementById('login-screen');

@@ -73,22 +73,18 @@ conn.execute(
 }
 
 fn seed_initial_data(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
-    let user_count: i32 = conn.query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))?;
+    let default_pass_hash = format!("{:x}", md5::compute("admin123"));
+    
+    // Zapytanie doda admina jeśli użytkownik 'admin' jeszcze nie istnieje
+    conn.execute(
+        "INSERT OR IGNORE INTO users (username, password_hash, role) VALUES ('admin', ?, 'admin')",
+        [&default_pass_hash],
+    )?;
 
-    if user_count == 0 {
-        let default_pass_hash = format!("{:x}", md5::compute("admin123"));
-        
-        conn.execute(
-            "INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')",
-            ["admin", &default_pass_hash],
-        )?;
-
-        // Domyślne ustawienie: 480 minut (8 godzin) dziennej normy
-        conn.execute(
-            "INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_target_minutes', '480')",
-            [],
-        )?;
-    }
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_target_seconds', '28800')",
+        [],
+    )?;
 
     Ok(())
 }
