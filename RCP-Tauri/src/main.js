@@ -251,6 +251,16 @@ let lastSeenDate = localDateString();
 setInterval(() => {
   const nowDate = localDateString();
   if (nowDate !== lastSeenDate) {
+    // Zmiana miesiąca: jeśli Raporty pokazywały "bieżący" miesiąc,
+    // przestawiamy je na nowy bieżący (wybór innego miesiąca zostaje bez zmian)
+    const prevYear = Number(lastSeenDate.slice(0, 4));
+    const prevMonth = Number(lastSeenDate.slice(5, 7));
+    if (selectedYear === prevYear && selectedMonth === prevMonth) {
+      selectedYear = Number(nowDate.slice(0, 4));
+      selectedMonth = Number(nowDate.slice(5, 7));
+      if (currentUser) initDateSelectors();
+    }
+
     lastSeenDate = nowDate;
     if (currentUser) updateUI();
   }
@@ -284,11 +294,13 @@ async function updateUI() {
   await closeForgottenSessions();
 
   try {
-  const stats = await invoke('get_dashboard_stats', { 
-    userId: Number(activeUserId),
-    year: Number(selectedYear),
-    month: Number(selectedMonth) // <-- rzutujemy na Number!
-  });
+    // Dashboard ZAWSZE liczy bieżący miesiąc – niezależnie od filtra w Raportach
+    const now = new Date();
+    const stats = await invoke('get_dashboard_stats', {
+      userId: Number(activeUserId),
+      year: now.getFullYear(),
+      month: now.getMonth() + 1
+    });
 
     // Zapisujemy odebrany obiekt do zmiennej globalnej
     currentStats = stats;
@@ -332,9 +344,9 @@ async function updateUI() {
 
     renderChart(logs);
 
-    // Przyciskami RCP steruje tylko aktualnie zalogowany użytkownik na swoje konto
-    const ownLogs = activeUserId === currentUser.id ? logs : await invoke('get_logs', { userId: currentUser.id, year: selectedYear, month: selectedMonth });
-    const activeLog = ownLogs.length > 0 && !ownLogs[0].time_out ? ownLogs[0] : null;
+    // Przyciskami RCP steruje tylko aktualnie zalogowany użytkownik na swoje konto.
+    // Stan przycisków = dzisiejsza otwarta sesja (niezależnie od filtra w Raportach)
+    const activeLog = await invoke('get_active_session', { userId: currentUser.id });
 
     if (!activeLog) {
       btnStart.disabled = false;

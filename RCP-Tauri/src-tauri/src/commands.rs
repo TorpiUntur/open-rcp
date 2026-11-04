@@ -1,5 +1,5 @@
 use crate::AppState;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -239,6 +239,38 @@ fn clock_out_internal(
     } else {
         Err("Brak aktywnej sesji!".into())
     }
+}
+
+/// Zwraca dzisiejszą otwartą sesję użytkownika (praca / wyjście) albo None.
+/// Na tej podstawie frontend ustawia stan przycisków RCP.
+#[tauri::command]
+pub fn get_active_session(
+    user_id: i32,
+    state: tauri::State<AppState>,
+) -> Result<Option<TimeLog>, String> {
+    let db = state.db.lock().map_err(|_| "Błąd blokady bazy danych")?;
+    let today = crate::time_calc::current_date();
+
+    db.query_row(
+        "SELECT id, user_id, date, time_in, time_out, duration_seconds, event_type
+         FROM time_log
+         WHERE user_id = ? AND date = ? AND time_out IS NULL
+         ORDER BY id DESC LIMIT 1",
+        params![user_id, today],
+        |row| {
+            Ok(TimeLog {
+                id: row.get(0)?,
+                user_id: row.get(1)?,
+                date: row.get(2)?,
+                time_in: row.get(3)?,
+                time_out: row.get(4)?,
+                duration_seconds: row.get(5)?,
+                event_type: row.get(6)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
 }
 
 // Godzina, o której automatycznie zamykamy sesję zapomnianą poprzedniego dnia

@@ -35,6 +35,7 @@ pub fn run() {
             commands::clock_out,
             commands::return_to_work,
             commands::close_forgotten_sessions,
+            commands::get_active_session,
             commands::get_logs,
             commands::get_dashboard_stats,
             commands::add_manual_log,
