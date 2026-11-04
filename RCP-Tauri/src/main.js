@@ -73,8 +73,25 @@ let targetUserId = null; // ID użytkownika, którego dane są aktualnie podglą
 let currentStats = null;
 let showZeroLeaveMode = true; // true: "Na Zero", false: "Pełny Dzień Pracy (8h)"
 
+// Stan "próg osiągnięty" z poprzedniego sprawdzenia (co 1 s).
+// Powiadomienie idzie przy przejściu false → true, więc:
+//  - nowy dzień (brak wejścia → "---") automatycznie resetuje stan,
+//  - jeśli godzina wyjścia przesunie się później (np. po wyjściu prywatnym),
+//    powiadomienie przyjdzie ponownie, gdy nowy próg zostanie osiągnięty.
 let notifiedZero = false;
 let notifiedStandard = false;
+
+function resetLeaveNotifications() {
+  notifiedZero = false;
+  notifiedStandard = false;
+}
+
+// Sekundy → "8h" / "7h 30m"
+function formatHoursMinutes(totalSeconds) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
 
 
 const adminUserSelectContainer = document.getElementById('admin-user-select-container');
@@ -131,6 +148,9 @@ function showAppScreen() {
   }
 
   targetUserId = currentUser.id;
+  // Świeży stan po zalogowaniu (np. inny użytkownik)
+  currentStats = null;
+  resetLeaveNotifications();
   initDateSelectors();
   loadUsersForAdmin();
   switchTab('dashboard');
@@ -182,6 +202,9 @@ loginForm.addEventListener('submit', async (e) => {
 btnLogout.addEventListener('click', async () => {
   await invoke('logout');
   currentUser = null;
+  // Po wylogowaniu nie liczymy już godzin wyjścia ani nie wysyłamy powiadomień
+  currentStats = null;
+  resetLeaveNotifications();
   showLoginScreen();
 });
 
@@ -245,16 +268,18 @@ function renderLeaveTime() {
     statTargetLeave.style.color = isStandardPassed ? '#a6e3a1' : 'inherit';
   }
 
-  // LOGIKA POWIADOMIEŃ SYSTEMOWYCH:
+  // LOGIKA POWIADOMIEŃ SYSTEMOWYCH (przy przejściu "nieosiągnięte" → "osiągnięte"):
   if (isZeroPassed && !notifiedZero) {
     sendSystemNotification("RCP Time Tracker", "Osiągnięto stan NA ZERO! Możesz bezpiecznie wyjść bez zaległości.");
-    notifiedZero = true;
   }
+  notifiedZero = isZeroPassed;
 
   if (isStandardPassed && !notifiedStandard) {
-    sendSystemNotification("RCP Time Tracker", "Ukończono pełny dzień pracy (8h)!");
-    notifiedStandard = true;
+    const target = currentStats.daily_target_seconds;
+    const targetText = target ? ` (${formatHoursMinutes(target)})` : '';
+    sendSystemNotification("RCP Time Tracker", `Ukończono pełny dzień pracy${targetText}!`);
   }
+  notifiedStandard = isStandardPassed;
 }
 
 // Lokalna data w formacie YYYY-MM-DD (bez przesunięcia UTC)
@@ -699,7 +724,8 @@ document.getElementById('input-import-csv').addEventListener('change', (e) => {
         userId: currentUser.id,
         csvContent: content
       });
-      csvMsg.style.color = "#a6e3a1";
+      // Zielony = wszystko OK, pomarańczowy = część wierszy odrzucona
+      csvMsg.style.color = res.includes("Błędne wiersze") ? "#fab387" : "#a6e3a1";
       csvMsg.textContent = res;
       await updateUI();
     } catch (err) {
@@ -708,6 +734,8 @@ document.getElementById('input-import-csv').addEventListener('change', (e) => {
     }
   };
   reader.readAsText(file);
+  // Reset pola, żeby ponowny wybór tego samego pliku też wywołał import
+  e.target.value = '';
 });
 
 async function loadUsersForAdmin() {
