@@ -385,7 +385,8 @@ pub fn get_dashboard_stats(
     let target_month_pattern = format!("{:04}-{:02}-%", year, month);
 
     // 1. Norma dzienna w sekundach (np. 8h = 28800 s)
-    let daily_target_seconds: i64 = db
+    // Bieżące ustawienie służy tylko jako zapas, gdy brak historii normy.
+    let default_target_seconds: i64 = db
         .query_row(
             "SELECT value FROM settings WHERE key = 'daily_target_seconds'",
             [],
@@ -394,6 +395,11 @@ pub fn get_dashboard_stats(
         .unwrap_or_else(|_| "28800".to_string())
         .parse()
         .unwrap_or(28800);
+
+    // Historia normy + weekendy/święta (norma 0)
+    let target_history = load_target_history(&db);
+    let today_target_seconds = target_for_date(&target_history, &today, default_target_seconds);
+    let today_is_non_working = crate::time_calc::is_non_working_day(&today);
 
     // 2. Pierwsze wejście dzisiaj i przerwy prywatne dzisiaj
     let today_first_in: Option<String> = db
@@ -433,7 +439,8 @@ pub fn get_dashboard_stats(
     let mut today_balance_seconds: Option<i64> = None;
 
     for (date, total) in daily_totals.filter_map(|r| r.ok()) {
-        let diff = total - daily_target_seconds;
+        // Norma tego konkretnego dnia: 0 w weekend/święto, inaczej wg historii normy
+        let diff = total - target_for_date(&target_history, &date, default_target_seconds);
         if date == today {
             today_balance_seconds = Some(diff);
         } else {
@@ -461,7 +468,7 @@ pub fn get_dashboard_stats(
     let target_leave_time = if let Some(ref first_in) = today_first_in {
         crate::time_calc::calculate_target_leave_time(
             first_in,
-            daily_target_seconds,
+            today_target_seconds,
             previous_days_balance_seconds,
             today_private_break_seconds,
         )
@@ -469,14 +476,16 @@ pub fn get_dashboard_stats(
         "---".to_string()
     };
 
-    let standard_leave_time = if let Some(ref first_in) = today_first_in {
-        crate::time_calc::calculate_standard_leave_time(
-            first_in,
-            daily_target_seconds,
-            today_private_break_seconds,
-        )
-    } else {
-        "---".to_string()
+    // W weekend / święto nie ma "pełnego dnia" – cały czas to nadgodziny
+    let standard_leave_time = match today_first_in {
+        Some(ref first_in) if !today_is_non_working => {
+            crate::time_calc::calculate_standard_leave_time(
+                first_in,
+                today_target_seconds,
+                today_private_break_seconds,
+            )
+        }
+        _ => "---".to_string(),
     };
 
     Ok(DashboardStats {
@@ -485,7 +494,7 @@ pub fn get_dashboard_stats(
         standard_leave_time,
         monthly_balance_seconds,
         today_private_break_seconds,
-        daily_target_seconds,
+        daily_target_seconds: today_target_seconds,
     })
 }
 // ==========================================
@@ -615,7 +624,12 @@ pub fn set_daily_target_seconds(
     seconds: i64,
     state: tauri::State<AppState>,
 ) -> Result<String, String> {
+    if !(0..=24 * 3600).contains(&seconds) {
+        return Err("Norma musi mieścić się w przedziale 0–24h".into());
+    }
+
     let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+    let today = crate::time_calc::current_date();
 
     db.execute(
         "INSERT OR REPLACE INTO settings (key, value) VALUES ('daily_target_seconds', ?)",
@@ -623,7 +637,46 @@ pub fn set_daily_target_seconds(
     )
     .map_err(|e| format!("Błąd zapisu ustawień: {}", e))?;
 
-    Ok("Zapisano nową normę czasową".into())
+    // Nowa norma obowiązuje od dziś – starsze dni zachowują swoją normę
+    db.execute(
+        "INSERT OR REPLACE INTO daily_target_history (effective_from, seconds) VALUES (?, ?)",
+        params![today, seconds],
+    )
+    .map_err(|e| format!("Błąd zapisu historii normy: {}", e))?;
+
+    Ok(format!("Zapisano nową normę czasową (obowiązuje od {})", today))
+}
+
+/// Historia normy dziennej: (obowiązuje_od, sekundy), rosnąco po dacie.
+fn load_target_history(db: &rusqlite::Connection) -> Vec<(String, i64)> {
+    let mut stmt = match db.prepare(
+        "SELECT effective_from, seconds FROM daily_target_history ORDER BY effective_from ASC",
+    ) {
+        Ok(stmt) => stmt,
+        Err(_) => return Vec::new(),
+    };
+
+    let history: Vec<(String, i64)> = match stmt.query_map([], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+    }) {
+        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+        Err(_) => Vec::new(),
+    };
+    history
+}
+
+/// Norma dla konkretnego dnia: 0 w weekendy i święta, w pozostałe dni norma
+/// obowiązująca w tym dniu wg historii (a gdy brak historii – `fallback`).
+fn target_for_date(history: &[(String, i64)], date: &str, fallback: i64) -> i64 {
+    if crate::time_calc::is_non_working_day(date) {
+        return 0;
+    }
+    history
+        .iter()
+        .rev()
+        .find(|(effective_from, _)| effective_from.as_str() <= date)
+        .map(|(_, seconds)| *seconds)
+        .unwrap_or(fallback)
 }
 
 // ==========================================

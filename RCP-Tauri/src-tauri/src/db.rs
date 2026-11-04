@@ -56,6 +56,36 @@ pub fn initialize_database(
         "INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_target_seconds', '28800')",
         [],
     )?;
+
+    // 3b. Historia normy dziennej – norma obowiązuje od danego dnia (bez działania wstecz)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS daily_target_history (
+            effective_from TEXT PRIMARY KEY,
+            seconds INTEGER NOT NULL
+        )",
+        [],
+    )?;
+
+    // Pierwsze uruchomienie po aktualizacji: obecna norma obowiązuje dla całej dotychczasowej historii
+    let history_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM daily_target_history", [], |r| r.get(0))?;
+    if history_count == 0 {
+        let current_target: i64 = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'daily_target_seconds'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(28800);
+
+        conn.execute(
+            "INSERT INTO daily_target_history (effective_from, seconds) VALUES ('0000-01-01', ?)",
+            [current_target],
+        )?;
+    }
+
     // 4. Tabela Absencji (L4 / Urlopy)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS absence_log (
