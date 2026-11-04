@@ -337,18 +337,42 @@ pub fn get_dashboard_stats(
         )
         .map_err(|e| e.to_string())?;
 
-    let mut monthly_balance_seconds: i64 = 0;
+    // Dzisiejszy dzień liczymy osobno – do godziny "na zero" wchodzi
+    // wyłącznie saldo z POPRZEDNICH dni (inaczej wynik skacze w ciągu dnia).
+    let mut previous_days_balance_seconds: i64 = 0;
+    let mut today_balance_seconds: Option<i64> = None;
 
-    for day in daily_totals.filter_map(|r| r.ok()) {
-        monthly_balance_seconds += day.1 - daily_target_seconds;
+    for (date, total) in daily_totals.filter_map(|r| r.ok()) {
+        let diff = total - daily_target_seconds;
+        if date == today {
+            today_balance_seconds = Some(diff);
+        } else {
+            previous_days_balance_seconds += diff;
+        }
     }
+
+    // Czy dziś jest jeszcze otwarta sesja (praca / wyjście)?
+    let today_has_open_session: bool = db
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM time_log WHERE user_id = ? AND date = ? AND time_out IS NULL)",
+            rusqlite::params![user_id, today],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+
+    // Wyświetlane saldo: w trakcie dnia tylko poprzednie dni,
+    // po zakończeniu dnia (brak otwartej sesji) – razem z dzisiejszym wynikiem.
+    let monthly_balance_seconds = match today_balance_seconds {
+        Some(today_diff) if !today_has_open_session => previous_days_balance_seconds + today_diff,
+        _ => previous_days_balance_seconds,
+    };
 
     // 4. Wyliczenie godzin wyjścia
     let target_leave_time = if let Some(ref first_in) = today_first_in {
         crate::time_calc::calculate_target_leave_time(
             first_in,
             daily_target_seconds,
-            monthly_balance_seconds,
+            previous_days_balance_seconds,
             today_private_break_seconds,
         )
     } else {
