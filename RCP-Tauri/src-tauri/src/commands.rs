@@ -492,6 +492,36 @@ pub fn get_dashboard_stats(
 // 3. EDYCJA RETROAKTYWNA I RAPORTY (KROK 4)
 // ==========================================
 
+/// Waliduje dane z formularza wpisu (dodawanie / edycja).
+/// Zwraca: (data, pełne wejście, pełne wyjście, czas trwania w sekundach).
+/// Godziny "8:00" / "08:00" są uzupełniane do "08:00:00".
+fn build_manual_entry(
+    date: &str,
+    time_in: &str,
+    time_out: Option<&str>,
+) -> Result<(String, String, Option<String>, Option<i64>), String> {
+    let date = crate::time_calc::normalize_date(date)?;
+    let full_time_in = format!("{} {}", date, crate::time_calc::normalize_time(time_in)?);
+
+    let full_time_out = match time_out.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) => Some(format!("{} {}", date, crate::time_calc::normalize_time(t)?)),
+        None => None,
+    };
+
+    let duration_seconds = match &full_time_out {
+        Some(out_time) => {
+            let duration = crate::time_calc::calculate_duration_seconds(&full_time_in, out_time);
+            if duration < 0 {
+                return Err("Godzina Stop nie może być wcześniejsza niż Start.".into());
+            }
+            Some(duration)
+        }
+        None => None,
+    };
+
+    Ok((date, full_time_in, full_time_out, duration_seconds))
+}
+
 // Ręczne dodanie wpisu (retroaktywnie)
 #[tauri::command]
 pub fn add_manual_log(
@@ -502,19 +532,10 @@ pub fn add_manual_log(
     event_type: String,
     state: tauri::State<AppState>,
 ) -> Result<String, String> {
+    let (date, full_time_in, full_time_out, duration_seconds) =
+        build_manual_entry(&date, &time_in, time_out.as_deref())?;
+
     let db = state.db.lock().map_err(|_| "Błąd bazy")?;
-
-    let full_time_in = format!("{} {}", date, time_in);
-    let full_time_out = time_out.as_ref().map(|t| format!("{} {}", date, t));
-
-    let duration_seconds = if let Some(ref out_time) = full_time_out {
-        Some(crate::time_calc::calculate_duration_seconds(
-            &full_time_in,
-            out_time,
-        ))
-    } else {
-        None
-    };
 
     db.execute(
         "INSERT INTO time_log (user_id, date, time_in, time_out, duration_seconds, event_type) 
@@ -543,22 +564,10 @@ pub fn update_log(
     event_type: String,
     state: tauri::State<AppState>,
 ) -> Result<String, String> {
+    let (date, full_time_in, full_time_out, duration_seconds) =
+        build_manual_entry(&date, &time_in, time_out.as_deref())?;
+
     let db = state.db.lock().map_err(|_| "Błąd bazy")?;
-
-    let full_time_in = format!("{} {}", date, time_in);
-    let full_time_out = time_out
-        .as_ref()
-        .filter(|t| !t.is_empty())
-        .map(|t| format!("{} {}", date, t));
-
-    let duration_seconds = if let Some(ref out_time) = full_time_out {
-        Some(crate::time_calc::calculate_duration_seconds(
-            &full_time_in,
-            out_time,
-        ))
-    } else {
-        None
-    };
 
     db.execute(
         "UPDATE time_log SET date = ?, time_in = ?, time_out = ?, duration_seconds = ?, event_type = ? 
