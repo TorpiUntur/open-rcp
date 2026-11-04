@@ -691,31 +691,94 @@ pub fn add_absence(
     absence_type: String,
     state: tauri::State<AppState>,
 ) -> Result<String, String> {
-    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+    const ABSENCE_TYPES: [&str; 3] = ["vacation", "sick_leave", "other"];
+    const MAX_RANGE_DAYS: i64 = 366;
 
-    let start =
-        chrono::NaiveDate::parse_from_str(&start_date, "%Y-%m-%d").map_err(|e| e.to_string())?;
-    let end =
-        chrono::NaiveDate::parse_from_str(&end_date, "%Y-%m-%d").map_err(|e| e.to_string())?;
+    if !ABSENCE_TYPES.contains(&absence_type.as_str()) {
+        return Err(format!("Nieznany typ nieobecności: {}", absence_type));
+    }
+
+    let start = chrono::NaiveDate::parse_from_str(start_date.trim(), "%Y-%m-%d")
+        .map_err(|_| format!("Niepoprawna data początkowa: \"{}\"", start_date))?;
+    let end = chrono::NaiveDate::parse_from_str(end_date.trim(), "%Y-%m-%d")
+        .map_err(|_| format!("Niepoprawna data końcowa: \"{}\"", end_date))?;
 
     if end < start {
         return Err("Data końcowa nie może być wcześniejsza niż początkowa!".into());
     }
+    if (end - start).num_days() >= MAX_RANGE_DAYS {
+        return Err("Zakres nieobecności nie może przekraczać roku.".into());
+    }
+
+    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+    let tx = db
+        .unchecked_transaction()
+        .map_err(|e| format!("Błąd bazy: {}", e))?;
+
+    let mut added = 0;
+    let mut changed = 0;
+    let mut already = 0;
+    let mut skipped_free = 0;
 
     let mut current = start;
     while current <= end {
         let date_str = current.format("%Y-%m-%d").to_string();
-
-        // Zapisujemy nieobecność (ignorujemy jeśli wpis na ten dzień już istnieje)
-        let _ = db.execute(
-            "INSERT OR IGNORE INTO absence_log (user_id, date, absence_type) VALUES (?, ?, ?)",
-            rusqlite::params![user_id, date_str, absence_type],
-        );
-
         current += chrono::Duration::days(1);
+
+        // Weekendy i święta pomijamy – to i tak dni wolne
+        if crate::time_calc::is_non_working_day(&date_str) {
+            skipped_free += 1;
+            continue;
+        }
+
+        let existing_type: Option<String> = tx
+            .query_row(
+                "SELECT absence_type FROM absence_log WHERE user_id = ? AND date = ?",
+                params![user_id, date_str],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| format!("Błąd bazy: {}", e))?;
+
+        match existing_type {
+            None => {
+                tx.execute(
+                    "INSERT INTO absence_log (user_id, date, absence_type) VALUES (?, ?, ?)",
+                    params![user_id, date_str, absence_type],
+                )
+                .map_err(|e| format!("Błąd zapisu: {}", e))?;
+                added += 1;
+            }
+            // Ten sam dzień, inny typ (np. urlop → L4) – podmieniamy typ
+            Some(ref t) if t != &absence_type => {
+                tx.execute(
+                    "UPDATE absence_log SET absence_type = ? WHERE user_id = ? AND date = ?",
+                    params![absence_type, user_id, date_str],
+                )
+                .map_err(|e| format!("Błąd zapisu: {}", e))?;
+                changed += 1;
+            }
+            Some(_) => already += 1,
+        }
     }
 
-    Ok("Dodano nieobecność".into())
+    tx.commit().map_err(|e| format!("Błąd zapisu: {}", e))?;
+
+    if added == 0 && changed == 0 && already == 0 {
+        return Err("Wybrany zakres obejmuje tylko weekendy / święta – nic nie dodano.".into());
+    }
+
+    let mut msg = format!("Dodano {} dni nieobecności", added);
+    if changed > 0 {
+        msg.push_str(&format!(", zmieniono typ dla {} dni", changed));
+    }
+    if already > 0 {
+        msg.push_str(&format!(", {} dni już było zapisanych", already));
+    }
+    if skipped_free > 0 {
+        msg.push_str(&format!(", pominięto {} dni wolnych (weekendy/święta)", skipped_free));
+    }
+    Ok(msg)
 }
 
 #[tauri::command]

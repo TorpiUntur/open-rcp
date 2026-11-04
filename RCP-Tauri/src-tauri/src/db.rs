@@ -98,6 +98,19 @@ pub fn initialize_database(
         [],
     )?;
 
+    // Jedna nieobecność na dzień: usuń istniejące duplikaty (zostaje najstarszy wpis)
+    // i załóż unikalny indeks (user_id, date)
+    conn.execute(
+        "DELETE FROM absence_log WHERE id NOT IN (
+            SELECT MIN(id) FROM absence_log GROUP BY user_id, date
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_absence_user_date ON absence_log(user_id, date)",
+        [],
+    )?;
+
     // Wsianie domyślnego konta admina, jeśli baza jest pusta
     seed_initial_data(&conn)?;
 
