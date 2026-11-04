@@ -1,5 +1,17 @@
 const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke || window.__TAURI_INVOKE__;
 
+// === Diagnostyka startu (#13) ===
+// 1) Sygnał dla watchdoga w Rust: strona się załadowała i komunikacja z Rust działa.
+//    Brak tego sygnału w 15 s → Rust przeładuje stronę (i zapisze to w logu).
+// 2) Błędy JS trafiają do pliku logu (%LOCALAPPDATA%\com.rcp.timetracker\logs\rcp.log).
+if (invoke) {
+  invoke('frontend_ready').catch(() => {});
+
+  const sendLog = (msg) => invoke('log_frontend', { message: String(msg) }).catch(() => {});
+  window.addEventListener('error', (e) => sendLog(`Błąd JS: ${e.message} @ ${e.filename}:${e.lineno}`));
+  window.addEventListener('unhandledrejection', (e) => sendLog(`Nieobsłużony błąd Promise: ${e.reason}`));
+}
+
 // 1. Elementy ekranowe i nawigacja
 const loginScreen = document.getElementById('login-screen');
 const appScreen = document.getElementById('app-screen');
