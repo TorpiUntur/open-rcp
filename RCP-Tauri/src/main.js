@@ -632,7 +632,7 @@ window.deleteLogEntry = async (id) => {
 btnAddManual.addEventListener('click', () => {
   dialogTitle.textContent = "Dodaj Zapomniany Wpis";
   editId.value = "";
-  editDate.value = new Date().toISOString().split('T')[0];
+  editDate.value = localDateString(); // lokalna data (toISOString daje UTC → po północy "wczoraj")
   editTimeIn.value = "08:00:00";
   editTimeOut.value = "16:00:00";
   editEventType.value = "work";
@@ -715,7 +715,7 @@ document.getElementById('btn-export-csv').addEventListener('click', async () => 
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.setAttribute("href", url);
-    link.setAttribute("download", `rcp_export_${viewedUserName()}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute("download", `rcp_export_${viewedUserName()}_${localDateString()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
