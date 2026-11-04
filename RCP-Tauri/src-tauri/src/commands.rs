@@ -759,90 +759,221 @@ pub fn delete_absence(absence_id: i32, state: tauri::State<AppState>) -> Result<
 // 6. IMPORT / EKSPORT CSV (KROK 7)
 // ==========================================
 
+// Dozwolone typy zdarzeń w time_log
+const EVENT_TYPES: [&str; 3] = ["work", "break_private", "business"];
+
+// Nagłówek nowego formatu CSV (jedna sesja w wierszu)
+const CSV_HEADER: &str = "date,time_in,time_out,event_type";
+
+/// Sesja odczytana z CSV, już zwalidowana i znormalizowana
+struct ImportedSession {
+    date: String,
+    time_in: String,
+    time_out: Option<String>,
+    duration_seconds: Option<i64>,
+    event_type: String,
+}
+
+/// Waliduje jedną sesję z CSV (data, godziny, typ) – te same reguły co przy ręcznym wpisie.
+fn parse_imported_session(
+    date: &str,
+    time_in: &str,
+    time_out: Option<&str>,
+    event_type: &str,
+) -> Result<ImportedSession, String> {
+    let event_type = event_type.trim().to_lowercase();
+    if !EVENT_TYPES.contains(&event_type.as_str()) {
+        return Err(format!("nieznany typ zdarzenia \"{}\"", event_type));
+    }
+
+    let (date, time_in, time_out, duration_seconds) =
+        build_manual_entry(date, time_in, time_out)?;
+
+    Ok(ImportedSession {
+        date,
+        time_in,
+        time_out,
+        duration_seconds,
+        event_type,
+    })
+}
+
 // IMPORT CSV
+// Obsługuje dwa formaty:
+//  - nowy (z eksportu): nagłówek "date,time_in,time_out,event_type", jedna sesja w wierszu
+//  - stary: "data,godzina,IN" / "data,godzina,OUT" (tylko praca)
+// Separator: przecinek lub średnik. Duplikaty (ta sama godzina wejścia i typ) są pomijane.
+// Wszystko w jednej transakcji – błąd zapisu cofa cały import.
 #[tauri::command]
 pub fn import_csv_data(
     user_id: i32,
     csv_content: String,
     state: tauri::State<AppState>,
 ) -> Result<String, String> {
+    // (numer linii, pola)
+    let rows: Vec<(usize, Vec<String>)> = csv_content
+        .lines()
+        .enumerate()
+        .map(|(i, line)| {
+            let line = line.trim().trim_start_matches('\u{feff}');
+            let parts: Vec<String> = line
+                .split(|c: char| c == ',' || c == ';')
+                .map(|p| p.trim().to_string())
+                .collect();
+            (i + 1, parts)
+        })
+        .filter(|(_, parts)| parts.iter().any(|p| !p.is_empty()))
+        .collect();
+
+    let is_new_format = rows
+        .first()
+        .map(|(_, parts)| parts.iter().any(|p| p.eq_ignore_ascii_case("time_in")))
+        .unwrap_or(false);
+
+    let mut sessions: Vec<ImportedSession> = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
+
+    if is_new_format {
+        for (line_no, parts) in rows.iter().skip(1) {
+            if parts.len() < 4 {
+                errors.push(format!("linia {}: za mało kolumn", line_no));
+                continue;
+            }
+            let time_out = Some(parts[2].as_str()).filter(|t| !t.is_empty());
+            match parse_imported_session(&parts[0], &parts[1], time_out, &parts[3]) {
+                Ok(session) => sessions.push(session),
+                Err(e) => errors.push(format!("linia {}: {}", line_no, e)),
+            }
+        }
+    } else {
+        // Stary format IN/OUT – łączymy w pary
+        let first_line_no = rows.first().map(|(n, _)| *n).unwrap_or(0);
+        let mut pending_in: Option<(usize, String, String)> = None; // (linia, data, godzina)
+
+        for (line_no, parts) in &rows {
+            if parts.len() < 3 {
+                errors.push(format!("linia {}: za mało kolumn", line_no));
+                continue;
+            }
+
+            match parts[2].to_uppercase().as_str() {
+                "IN" => {
+                    if let Some((in_line, _, _)) = pending_in.take() {
+                        errors.push(format!("linia {}: IN bez OUT – pominięto", in_line));
+                    }
+                    pending_in = Some((*line_no, parts[0].clone(), parts[1].clone()));
+                }
+                "OUT" => match pending_in.take() {
+                    Some((in_line, in_date, in_time)) => {
+                        let same_day = crate::time_calc::normalize_date(&in_date).ok()
+                            == crate::time_calc::normalize_date(&parts[0]).ok();
+                        if !same_day {
+                            errors.push(format!(
+                                "linia {}: OUT innego dnia niż IN (praca po północy nieobsługiwana)",
+                                line_no
+                            ));
+                            continue;
+                        }
+                        match parse_imported_session(&in_date, &in_time, Some(parts[1].as_str()), "work") {
+                            Ok(session) => sessions.push(session),
+                            Err(e) => errors.push(format!("linie {}–{}: {}", in_line, line_no, e)),
+                        }
+                    }
+                    None => errors.push(format!("linia {}: OUT bez wcześniejszego IN", line_no)),
+                },
+                _ => {
+                    // Pierwsza linia z nieznaną akcją to najpewniej nagłówek
+                    if *line_no != first_line_no {
+                        errors.push(format!("linia {}: nieznana akcja \"{}\"", line_no, parts[2]));
+                    }
+                }
+            }
+        }
+
+        // IN na końcu pliku = sesja otwarta (np. dzisiejsza praca w toku)
+        if let Some((in_line, in_date, in_time)) = pending_in {
+            match parse_imported_session(&in_date, &in_time, None, "work") {
+                Ok(session) => sessions.push(session),
+                Err(e) => errors.push(format!("linia {}: {}", in_line, e)),
+            }
+        }
+    }
+
+    // Zapis w jednej transakcji, z pomijaniem duplikatów
     let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+    let tx = db
+        .unchecked_transaction()
+        .map_err(|e| format!("Błąd bazy: {}", e))?;
 
-    let mut lines = csv_content.lines().peekable();
-    let mut imported_count = 0;
+    let mut imported = 0;
+    let mut duplicates = 0;
 
-    let mut current_in_date: Option<String> = None;
-    let mut current_in_time: Option<String> = None;
+    for s in &sessions {
+        let exists: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM time_log WHERE user_id = ? AND time_in = ? AND event_type = ?)",
+                params![user_id, s.time_in, s.event_type],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("Błąd bazy: {}", e))?;
 
-    while let Some(line) = lines.next() {
-        let parts: Vec<&str> = line.trim().split(',').collect();
-        if parts.len() < 3 {
+        if exists {
+            duplicates += 1;
             continue;
         }
 
-        let date = parts[0].trim();
-        let time = parts[1].trim();
-        let action = parts[2].trim().to_uppercase();
+        tx.execute(
+            "INSERT INTO time_log (user_id, date, time_in, time_out, duration_seconds, event_type)
+             VALUES (?, ?, ?, ?, ?, ?)",
+            params![
+                user_id,
+                s.date,
+                s.time_in,
+                s.time_out,
+                s.duration_seconds,
+                s.event_type
+            ],
+        )
+        .map_err(|e| format!("Błąd zapisu (import cofnięty): {}", e))?;
+        imported += 1;
+    }
 
-        let full_timestamp = format!("{} {}", date, time);
+    tx.commit().map_err(|e| format!("Błąd zapisu (import cofnięty): {}", e))?;
 
-        if action == "IN" {
-            // Jeśli mieliśmy wcześniej wiszący "IN" bez "OUT", zapisujemy go jako otwartą sesję
-            if let (Some(prev_date), Some(prev_time)) =
-                (current_in_date.take(), current_in_time.take())
-            {
-                let prev_timestamp = format!("{} {}", prev_date, prev_time);
-                let _ = db.execute(
-                    "INSERT INTO time_log (user_id, date, time_in, event_type) VALUES (?, ?, ?, 'work')",
-                    rusqlite::params![user_id, prev_date, prev_timestamp],
-                );
-                imported_count += 1;
-            }
-
-            current_in_date = Some(date.to_string());
-            current_in_time = Some(time.to_string());
-        } else if action == "OUT" {
-            if let (Some(in_date), Some(in_time)) = (current_in_date.take(), current_in_time.take())
-            {
-                let full_in = format!("{} {}", in_date, in_time);
-                let duration =
-                    crate::time_calc::calculate_duration_seconds(&full_in, &full_timestamp);
-
-                let _ = db.execute(
-                    "INSERT INTO time_log (user_id, date, time_in, time_out, duration_seconds, event_type) 
-                     VALUES (?, ?, ?, ?, ?, 'work')",
-                    rusqlite::params![user_id, in_date, full_in, full_timestamp, duration],
-                );
-                imported_count += 1;
-            }
+    // Podsumowanie
+    let mut msg = format!("Zaimportowano {} sesji", imported);
+    if duplicates > 0 {
+        msg.push_str(&format!(", pominięto {} duplikatów", duplicates));
+    }
+    if !errors.is_empty() {
+        let shown = errors.len().min(5);
+        msg.push_str(&format!(
+            ". Błędne wiersze ({}): {}",
+            errors.len(),
+            errors[..shown].join("; ")
+        ));
+        if errors.len() > shown {
+            msg.push_str(" …");
         }
     }
 
-    // Jeśli na końcu pliku pozostał wiszący IN
-    if let (Some(in_date), Some(in_time)) = (current_in_date, current_in_time) {
-        let full_in = format!("{} {}", in_date, in_time);
-        let _ = db.execute(
-            "INSERT INTO time_log (user_id, date, time_in, event_type) VALUES (?, ?, ?, 'work')",
-            rusqlite::params![user_id, in_date, full_in],
-        );
-        imported_count += 1;
+    // Nic się nie udało przez błędy w pliku → zgłoś jako błąd
+    if imported == 0 && duplicates == 0 && !errors.is_empty() {
+        return Err(msg);
     }
 
-    Ok(format!(
-        "Pomyślnie zaimportowano {} sesji z pliku CSV!",
-        imported_count
-    ))
+    Ok(msg)
 }
 
-// EKSPORT CSV
+// EKSPORT CSV – wszystkie typy zdarzeń, jedna sesja w wierszu (format zgodny z importem)
 #[tauri::command]
 pub fn export_csv_data(user_id: i32, state: tauri::State<AppState>) -> Result<String, String> {
     let db = state.db.lock().map_err(|_| "Błąd bazy")?;
 
     let mut stmt = db
         .prepare(
-            "SELECT date, time_in, time_out FROM time_log 
-         WHERE user_id = ? AND event_type = 'work' ORDER BY id ASC",
+            "SELECT date, time_in, time_out, event_type FROM time_log
+             WHERE user_id = ? ORDER BY date ASC, time_in ASC, id ASC",
         )
         .map_err(|e| e.to_string())?;
 
@@ -852,25 +983,26 @@ pub fn export_csv_data(user_id: i32, state: tauri::State<AppState>) -> Result<St
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(3)?,
             ))
         })
         .map_err(|e| e.to_string())?;
 
-    let mut csv_lines = Vec::new();
+    // "YYYY-MM-DD HH:MM:SS" → "HH:MM:SS"
+    fn time_part(ts: &str) -> &str {
+        ts.split(' ').nth(1).unwrap_or(ts)
+    }
 
-    for r in rows.filter_map(|r| r.ok()) {
-        let date = r.0;
-        let time_in = r.1.split(' ').nth(1).unwrap_or(&r.1).to_string();
-        csv_lines.push(format!("{},{},IN", date, time_in));
+    let mut csv_lines = vec![CSV_HEADER.to_string()];
 
-        if let Some(time_out_full) = r.2 {
-            let time_out = time_out_full
-                .split(' ')
-                .nth(1)
-                .unwrap_or(&time_out_full)
-                .to_string();
-            csv_lines.push(format!("{},{},OUT", date, time_out));
-        }
+    for (date, time_in, time_out, event_type) in rows.filter_map(|r| r.ok()) {
+        csv_lines.push(format!(
+            "{},{},{},{}",
+            date,
+            time_part(&time_in),
+            time_out.as_deref().map(time_part).unwrap_or(""),
+            event_type
+        ));
     }
 
     Ok(csv_lines.join("\n"))
