@@ -67,7 +67,8 @@ pub fn calculate_target_leave_time(
             daily_target_seconds - previous_days_balance_seconds + today_private_break_seconds;
 
         let target_time = start + chrono::Duration::seconds(required_seconds);
-        target_time.format("%H:%M:%S").to_string()
+        // Pełny znacznik z datą – frontend porównuje prawdziwe daty (wyjście może wypaść po północy)
+        target_time.format("%Y-%m-%d %H:%M:%S").to_string()
     } else {
         "---".to_string()
     }
@@ -82,7 +83,7 @@ pub fn calculate_standard_leave_time(
     if let Some(start) = parse_timestamp(first_in_str) {
         let total_needed_seconds = daily_target_seconds + today_private_break_seconds;
         let target_time = start + chrono::Duration::seconds(total_needed_seconds);
-        target_time.format("%H:%M:%S").to_string()
+        target_time.format("%Y-%m-%d %H:%M:%S").to_string()
     } else {
         "---".to_string()
     }

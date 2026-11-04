@@ -197,29 +197,50 @@ if (cardToggleLeave) {
   });
 }
 
+// "YYYY-MM-DD HH:MM:SS" → Date w czasie lokalnym (null, jeśli brak / błędny format)
+function parseLocalTimestamp(ts) {
+  if (!ts || ts === '---' || !ts.includes(' ')) return null;
+  const d = new Date(ts.replace(' ', 'T'));
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// Godzina wyjścia do wyświetlenia: sama godzina, jeśli dziś;
+// z datą (dd.mm), jeśli wypada innego dnia (np. po północy)
+function formatLeaveTime(d) {
+  if (!d) return '---';
+  const time = d.toTimeString().split(' ')[0]; // "HH:MM:SS"
+  const day = localDateString(d);
+  if (day === localDateString()) return time;
+  return `${day.slice(8, 10)}.${day.slice(5, 7)} ${time}`;
+}
+
 // Funkcja zmieniająca tekst i godzinę w zależności od wybranego trybu
 function renderLeaveTime() {
   if (!currentStats || !statTargetLeave) return;
 
   const now = new Date();
-  const currentFormattedTime = now.toTimeString().split(' ')[0]; // np. "14:45:02"
 
+  // Backend zwraca pełny znacznik "YYYY-MM-DD HH:MM:SS" (z datą),
+  // więc porównujemy prawdziwe daty, a nie same godziny jako tekst
   const targetZero = currentStats.targetLeaveTime || currentStats.target_leave_time || "---";
   const targetStandard = currentStats.standardLeaveTime || currentStats.standard_leave_time || "---";
 
+  const zeroDate = parseLocalTimestamp(targetZero);
+  const standardDate = parseLocalTimestamp(targetStandard);
+
   // Sprawdzanie przekroczenia czasu dla Na Zero
-  const isZeroPassed = targetZero !== "---" && currentFormattedTime >= targetZero;
+  const isZeroPassed = zeroDate !== null && now >= zeroDate;
   // Sprawdzanie przekroczenia czasu dla Pełnego Dnia
-  const isStandardPassed = targetStandard !== "---" && currentFormattedTime >= targetStandard;
+  const isStandardPassed = standardDate !== null && now >= standardDate;
 
   if (showZeroLeaveMode) {
     if (statLeaveLabel) statLeaveLabel.textContent = "Wyjście (Na Zero) 🔄";
-    statTargetLeave.textContent = targetZero;
+    statTargetLeave.textContent = formatLeaveTime(zeroDate);
     // Zmiana koloru czcionki na zielony po osiągnięciu progu Na Zero
     statTargetLeave.style.color = isZeroPassed ? '#a6e3a1' : 'inherit';
   } else {
     if (statLeaveLabel) statLeaveLabel.textContent = "Wyjście (Pełny Dzień) 🔄";
-    statTargetLeave.textContent = targetStandard;
+    statTargetLeave.textContent = formatLeaveTime(standardDate);
     // Zmiana koloru czcionki na zielony po osiągnięciu 8h
     statTargetLeave.style.color = isStandardPassed ? '#a6e3a1' : 'inherit';
   }
