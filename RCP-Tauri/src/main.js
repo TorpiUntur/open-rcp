@@ -70,6 +70,23 @@ let selectedMonth = new Date().getMonth() + 1; // 1 - 12
 
 let targetUserId = null; // ID użytkownika, którego dane są aktualnie podglądane
 
+// Zasada: Dashboard (statystyki, przyciski RCP, powiadomienia) i Urlopy = ZAWSZE zalogowany użytkownik.
+// Raporty (tabela, wykres, dodawanie/edycja/usuwanie wpisów, import/eksport CSV) = użytkownik
+// wybrany w liście "Pracownik" (admin), domyślnie zalogowany.
+function viewedUserId() {
+  return targetUserId || currentUser.id;
+}
+
+function viewedUserName() {
+  if (viewedUserId() === currentUser.id) return currentUser.username;
+  const opt = selectUser.selectedOptions && selectUser.selectedOptions[0];
+  return opt ? opt.textContent.split(' ')[0] : `user${viewedUserId()}`;
+}
+
+function isViewingOtherUser() {
+  return currentUser && viewedUserId() !== currentUser.id;
+}
+
 let currentStats = null;
 let showZeroLeaveMode = true; // true: "Na Zero", false: "Pełny Dzień Pracy (8h)"
 
@@ -335,15 +352,16 @@ async function closeForgottenSessions() {
 // 5. Odświeżanie Dashboardu i Tabeli Logów
 async function updateUI() {
   if (!currentUser) return;
-  const activeUserId = targetUserId || currentUser.id;
+  const activeUserId = viewedUserId(); // tylko dla Raportów
 
   await closeForgottenSessions();
 
   try {
-    // Dashboard ZAWSZE liczy bieżący miesiąc – niezależnie od filtra w Raportach
+    // Dashboard ZAWSZE liczy bieżący miesiąc i ZAWSZE zalogowanego użytkownika
+    // (niezależnie od filtra miesiąca i wybranego pracownika w Raportach)
     const now = new Date();
     const stats = await invoke('get_dashboard_stats', {
-      userId: Number(activeUserId),
+      userId: Number(currentUser.id),
       year: now.getFullYear(),
       month: now.getMonth() + 1
     });
@@ -636,7 +654,7 @@ editForm.addEventListener('submit', async (e) => {
       });
     } else {
       await invoke('add_manual_log', {
-        userId: currentUser.id,
+        userId: viewedUserId(), // wpis trafia do użytkownika oglądanego w Raportach
         date: editDate.value,
         timeIn: editTimeIn.value,
         timeOut: editTimeOut.value || null,
@@ -690,14 +708,14 @@ btnStop.addEventListener('click', async () => {
 document.getElementById('btn-export-csv').addEventListener('click', async () => {
   const csvMsg = document.getElementById('csv-msg');
   try {
-    const csvContent = await invoke('export_csv_data', { userId: currentUser.id });
-    
+    const csvContent = await invoke('export_csv_data', { userId: viewedUserId() });
+
     // Pobranie pliku przez przeglądarkę
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.setAttribute("href", url);
-    link.setAttribute("download", `rcp_export_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute("download", `rcp_export_${viewedUserName()}_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -716,12 +734,20 @@ document.getElementById('input-import-csv').addEventListener('change', (e) => {
   const csvMsg = document.getElementById('csv-msg');
   if (!file) return;
 
+  // Import do cudzego konta – upewnij się, że to zamierzone
+  if (isViewingOtherUser() &&
+      !confirm(`Zaimportować dane do konta "${viewedUserName()}"?`)) {
+    e.target.value = '';
+    return;
+  }
+  const importUserId = viewedUserId();
+
   const reader = new FileReader();
   reader.onload = async (event) => {
     try {
       const content = event.target.result;
       const res = await invoke('import_csv_data', {
-        userId: currentUser.id,
+        userId: importUserId,
         csvContent: content
       });
       // Zielony = wszystko OK, pomarańczowy = część wierszy odrzucona
