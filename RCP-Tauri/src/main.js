@@ -236,17 +236,52 @@ function renderLeaveTime() {
   }
 }
 
-// Wstaw wywołanie checkTimers co sekundę, by odświeżać stan w czasie rzeczywistym
+// Lokalna data w formacie YYYY-MM-DD (bez przesunięcia UTC)
+function localDateString(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+let lastSeenDate = localDateString();
+
+// Co sekundę: odświeżanie godziny wyjścia + wykrycie zmiany dnia
+// (aplikacja otwarta przez północ / wybudzenie komputera następnego dnia)
 setInterval(() => {
+  const nowDate = localDateString();
+  if (nowDate !== lastSeenDate) {
+    lastSeenDate = nowDate;
+    if (currentUser) updateUI();
+  }
+
   if (currentStats) {
     renderLeaveTime();
   }
 }, 1000);
 
+// Zamyka sesje zapomniane w poprzednich dniach (o 22:00) i pokazuje monit
+async function closeForgottenSessions() {
+  if (!currentUser) return;
+  try {
+    const closedDates = await invoke('close_forgotten_sessions', { userId: currentUser.id });
+    if (closedDates && closedDates.length > 0) {
+      const msg = `Zapomniano zamknąć sesję (${closedDates.join(', ')}). ` +
+        `Zamknięto ją automatycznie o 22:00 – popraw godzinę wyjścia w zakładce Raporty.`;
+      statusMsg.textContent = msg;
+      alert(msg);
+    }
+  } catch (err) {
+    console.error("Błąd zamykania zapomnianych sesji:", err);
+  }
+}
+
 // 5. Odświeżanie Dashboardu i Tabeli Logów
 async function updateUI() {
   if (!currentUser) return;
   const activeUserId = targetUserId || currentUser.id;
+
+  await closeForgottenSessions();
 
   try {
   const stats = await invoke('get_dashboard_stats', { 

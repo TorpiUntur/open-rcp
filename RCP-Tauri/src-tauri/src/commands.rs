@@ -241,6 +241,64 @@ fn clock_out_internal(
     }
 }
 
+// Godzina, o której automatycznie zamykamy sesję zapomnianą poprzedniego dnia
+const FORGOTTEN_SESSION_CLOSE_TIME: &str = "22:00:00";
+
+/// Zamyka wszystkie otwarte sesje użytkownika z dni wcześniejszych niż dziś
+/// (zapomniany Stop). Sesja dostaje wyjście o 22:00 tego samego dnia
+/// (lub równe wejściu, jeśli zaczęła się po 22:00).
+/// Zwraca listę dat, w których coś zamknięto – frontend pokazuje monit.
+#[tauri::command]
+pub fn close_forgotten_sessions(
+    user_id: i32,
+    state: tauri::State<AppState>,
+) -> Result<Vec<String>, String> {
+    let db = state.db.lock().map_err(|_| "Błąd blokady bazy danych")?;
+    let today = crate::time_calc::current_date();
+
+    let open_sessions: Vec<(i32, String, String)> = {
+        let mut stmt = db
+            .prepare(
+                "SELECT id, date, time_in FROM time_log
+                 WHERE user_id = ? AND date < ? AND time_out IS NULL
+                 ORDER BY date ASC, id ASC",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let rows: Vec<(i32, String, String)> = stmt
+            .query_map(rusqlite::params![user_id, today], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        rows
+    };
+
+    let mut closed_dates: Vec<String> = Vec::new();
+
+    for (id, date, time_in) in open_sessions {
+        let mut time_out = format!("{} {}", date, FORGOTTEN_SESSION_CLOSE_TIME);
+        // Format "YYYY-MM-DD HH:MM:SS" sortuje się poprawnie jako tekst
+        if time_in > time_out {
+            time_out = time_in.clone();
+        }
+        let duration = crate::time_calc::calculate_duration_seconds(&time_in, &time_out);
+
+        db.execute(
+            "UPDATE time_log SET time_out = ?, duration_seconds = ? WHERE id = ?",
+            rusqlite::params![time_out, duration, id],
+        )
+        .map_err(|e| e.to_string())?;
+
+        if !closed_dates.contains(&date) {
+            closed_dates.push(date);
+        }
+    }
+
+    Ok(closed_dates)
+}
+
 // ZMIANA: Pobieranie logów przefiltrowanych po Roku i Miesiącu (np. year = 2026, month = 7)
 #[tauri::command]
 pub fn get_logs(
