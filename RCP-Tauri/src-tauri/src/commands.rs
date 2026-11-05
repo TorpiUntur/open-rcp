@@ -28,6 +28,11 @@ pub struct DashboardStats {
     pub monthly_balance_seconds: i64,     // W sekundach
     pub today_private_break_seconds: i64, // W sekundach
     pub daily_target_seconds: i64,        // W sekundach
+    // 1.1.1: dane do salda w czasie rzeczywistym (liczone co sekundę we frontendzie)
+    pub previous_days_balance_seconds: i64, // Saldo miesiąca bez dzisiejszego dnia
+    pub today_closed_work_seconds: i64,     // Dziś: suma zamkniętych sesji praca + służbowe
+    pub open_work_since: Option<String>,    // Wejście otwartej sesji praca/służbowe (dziś), inaczej None
+    pub today_has_open_session: bool,       // Dziś trwa jakakolwiek sesja (praca / wyjście)
 }
 
 #[derive(Serialize)]
@@ -464,6 +469,23 @@ pub fn get_dashboard_stats(
         _ => previous_days_balance_seconds,
     };
 
+    // Dzisiejszy przepracowany czas z zamkniętych sesji (praca + służbowe)
+    let today_closed_work_seconds: i64 = today_balance_seconds
+        .map(|diff| diff + today_target_seconds)
+        .unwrap_or(0);
+
+    // Otwarta dziś sesja pracy / wyjścia służbowego – od kiedy trwa.
+    // (Wyjście prywatne nie liczy się do pracy, więc saldo wtedy stoi.)
+    let open_work_since: Option<String> = db
+        .query_row(
+            "SELECT time_in FROM time_log
+             WHERE user_id = ? AND date = ? AND time_out IS NULL AND event_type IN ('work', 'business')
+             ORDER BY id DESC LIMIT 1",
+            rusqlite::params![user_id, today],
+            |r| r.get::<_, String>(0),
+        )
+        .ok();
+
     // 4. Wyliczenie godzin wyjścia
     let target_leave_time = if let Some(ref first_in) = today_first_in {
         crate::time_calc::calculate_target_leave_time(
@@ -495,6 +517,10 @@ pub fn get_dashboard_stats(
         monthly_balance_seconds,
         today_private_break_seconds,
         daily_target_seconds: today_target_seconds,
+        previous_days_balance_seconds,
+        today_closed_work_seconds,
+        open_work_since,
+        today_has_open_session,
     })
 }
 // ==========================================

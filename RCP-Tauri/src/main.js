@@ -311,6 +311,35 @@ function renderLeaveTime() {
   notifiedStandard = isStandardPassed;
 }
 
+// Saldo miesięczne do wyświetlenia (1.1.1 – tryb real time).
+// W trakcie dnia (otwarta sesja) saldo = poprzednie dni; dzisiejszy wynik
+// doliczamy dopiero, gdy dziś przepracowany czas przekroczy normę dnia –
+// od tego momentu saldo rośnie sekunda po sekundzie (dług maleje,
+// po przejściu przez zero rośnie nadwyżka). Na wyjściu prywatnym saldo stoi.
+// Bez otwartej sesji (po Stop) – wartość z backendu, jak dotąd.
+function currentBalanceSeconds() {
+  if (!currentStats) return 0;
+  const s = currentStats;
+  // Brak otwartej sesji (dzień zakończony / jeszcze nie zaczęty) – saldo z backendu
+  if (!s.today_has_open_session) return s.monthly_balance_seconds;
+
+  const openSince = parseLocalTimestamp(s.open_work_since); // null na wyjściu prywatnym
+  let workedToday = s.today_closed_work_seconds || 0;
+  if (openSince !== null) {
+    workedToday += Math.max(0, Math.floor((Date.now() - openSince.getTime()) / 1000));
+  }
+  const overTarget = workedToday - (s.daily_target_seconds || 0);
+  return s.previous_days_balance_seconds + Math.max(0, overTarget);
+}
+
+function renderBalance() {
+  const balanceEl = document.getElementById('stat-balance');
+  if (!balanceEl || !currentStats) return;
+  const balance = currentBalanceSeconds();
+  balanceEl.textContent = formatSeconds(balance, true);
+  balanceEl.style.color = balance >= 0 ? '#a6e3a1' : '#f38ba8';
+}
+
 // Lokalna data w formacie YYYY-MM-DD (bez przesunięcia UTC)
 function localDateString(d = new Date()) {
   const y = d.getFullYear();
@@ -342,6 +371,7 @@ setInterval(() => {
 
   if (currentStats) {
     renderLeaveTime();
+    renderBalance();
   }
 }, 1000);
 
@@ -390,9 +420,8 @@ async function updateUI() {
     
     // Usunięto stat-target-leave.textContent, ponieważ obsługuje go renderLeaveTime()
     
-    const balanceEl = document.getElementById('stat-balance');
-    balanceEl.textContent = formatSeconds(stats.monthly_balance_seconds, true);
-    balanceEl.style.color = stats.monthly_balance_seconds >= 0 ? '#a6e3a1' : '#f38ba8';
+    // Saldo miesięczne (po przekroczeniu normy dnia liczone na żywo – patrz renderBalance)
+    renderBalance();
 
     document.getElementById('stat-break').textContent = formatSeconds(stats.today_private_break_seconds, false);
 
