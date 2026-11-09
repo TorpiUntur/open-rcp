@@ -100,7 +100,6 @@ function isViewingOtherUser() {
 }
 
 let currentStats = null;
-let showZeroLeaveMode = true; // true: "Na Zero", false: "Pełny Dzień Pracy (8h)"
 
 // Stan "próg osiągnięty" z poprzedniego sprawdzenia (co 1 s).
 // Powiadomienie idzie przy przejściu false → true, więc:
@@ -180,6 +179,9 @@ function showAppScreen() {
   targetUserId = currentUser.id;
   // Świeży stan po zalogowaniu (np. inny użytkownik)
   currentStats = null;
+  todayLogs = [];
+  recentDays = [];
+  lastAxisRenderKey = '';
   resetLeaveNotifications();
   initDateSelectors();
   loadUsersForAdmin();
@@ -238,18 +240,6 @@ btnLogout.addEventListener('click', async () => {
   showLoginScreen();
 });
 
-const cardToggleLeave = document.getElementById('card-toggle-leave');
-const statLeaveLabel = document.getElementById('stat-leave-label');
-const statTargetLeave = document.getElementById('stat-target-leave');
-
-// Listener kliknięcia w kafel
-if (cardToggleLeave) {
-  cardToggleLeave.addEventListener('click', () => {
-    showZeroLeaveMode = !showZeroLeaveMode; // Odwracamy stan (true/false)
-    renderLeaveTime();                      // Odświeżamy tylko godzinę wyjścia
-  });
-}
-
 // "YYYY-MM-DD HH:MM:SS" → Date w czasie lokalnym (null, jeśli brak / błędny format)
 function parseLocalTimestamp(ts) {
   if (!ts || ts === '---' || !ts.includes(' ')) return null;
@@ -257,46 +247,18 @@ function parseLocalTimestamp(ts) {
   return isNaN(d.getTime()) ? null : d;
 }
 
-// Godzina wyjścia do wyświetlenia: sama godzina, jeśli dziś;
-// z datą (dd.mm), jeśli wypada innego dnia (np. po północy)
-function formatLeaveTime(d) {
-  if (!d) return '---';
-  const time = d.toTimeString().split(' ')[0]; // "HH:MM:SS"
-  const day = localDateString(d);
-  if (day === localDateString()) return time;
-  return `${day.slice(8, 10)}.${day.slice(5, 7)} ${time}`;
-}
-
-// Funkcja zmieniająca tekst i godzinę w zależności od wybranego trybu
+// Powiadomienia "na zero" / "pełny dzień" (nazwa funkcji zostaje – woła ją interwał co 1 s).
+// Redesign etap 2: próg liczony z FAKTYCZNIE przepracowanego czasu (computeDayState),
+// a nie z godziny wyjścia z backendu. Dzięki temu:
+//  - wyjście prywatne w toku przesuwa próg (wcześniej dopiero po powrocie),
+//  - po Stop przed normą powiadomienie nie przychodzi "z zegara".
 function renderLeaveTime() {
-  if (!currentStats || !statTargetLeave) return;
+  if (!currentStats) return;
 
-  const now = new Date();
-
-  // Backend zwraca pełny znacznik "YYYY-MM-DD HH:MM:SS" (z datą),
-  // więc porównujemy prawdziwe daty, a nie same godziny jako tekst
-  const targetZero = currentStats.targetLeaveTime || currentStats.target_leave_time || "---";
-  const targetStandard = currentStats.standardLeaveTime || currentStats.standard_leave_time || "---";
-
-  const zeroDate = parseLocalTimestamp(targetZero);
-  const standardDate = parseLocalTimestamp(targetStandard);
-
-  // Sprawdzanie przekroczenia czasu dla Na Zero
-  const isZeroPassed = zeroDate !== null && now >= zeroDate;
-  // Sprawdzanie przekroczenia czasu dla Pełnego Dnia
-  const isStandardPassed = standardDate !== null && now >= standardDate;
-
-  if (showZeroLeaveMode) {
-    if (statLeaveLabel) statLeaveLabel.textContent = "Wyjście – na zero";
-    statTargetLeave.textContent = formatLeaveTime(zeroDate);
-    // Kolor akcentu po osiągnięciu progu Na Zero
-    statTargetLeave.style.color = isZeroPassed ? 'var(--accent)' : 'inherit';
-  } else {
-    if (statLeaveLabel) statLeaveLabel.textContent = "Wyjście – pełny dzień";
-    statTargetLeave.textContent = formatLeaveTime(standardDate);
-    // Kolor akcentu po osiągnięciu pełnego dnia
-    statTargetLeave.style.color = isStandardPassed ? 'var(--accent)' : 'inherit';
-  }
+  const st = computeDayState();
+  const started = st.firstIn !== null;
+  const isZeroPassed = started && st.toZero <= 0;
+  const isStandardPassed = started && !st.freeDay && st.toFull <= 0;
 
   // LOGIKA POWIADOMIEŃ SYSTEMOWYCH (przy przejściu "nieosiągnięte" → "osiągnięte"):
   if (isZeroPassed && !notifiedZero) {
@@ -367,6 +329,333 @@ function timePart(ts) {
   return ts ? (ts.split(' ')[1] || ts) : '';
 }
 
+// ==========================================
+// EKRAN DZIŚ (redesign etap 2): liczniki, oś dnia, ostatnie dni
+// ==========================================
+const MONTHS_NOMINATIVE = ['styczeń', 'luty', 'marzec', 'kwiecień', 'maj', 'czerwiec',
+  'lipiec', 'sierpień', 'wrzesień', 'październik', 'listopad', 'grudzień'];
+const eventShort = { work: 'Praca', break_private: 'Prywatne', business: 'Służbowe' };
+
+let todayLogs = [];               // dzisiejsze wpisy zalogowanego użytkownika (rosnąco po godzinie)
+let recentDays = [];              // [{ date, seconds }] – ostatnie dni z pracą przed dziś (rosnąco)
+let defaultTargetSeconds = 28800; // bieżąca norma z ustawień (do sald poprzednich dni)
+let lastAxisRenderKey = '';       // oś i ostatnie dni przerysowujemy raz na minutę (lub po zmianie danych)
+
+// Polskie święta ustawowe – kopia logiki z time_calc.rs (easter_sunday / is_polish_holiday)
+function easterSunday(year) {
+  const a = year % 19, b = Math.floor(year / 100), c = year % 100;
+  const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month - 1, day);
+}
+
+function isPolishHoliday(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const md = `${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  const fixed = ['01-01', '01-06', '05-01', '05-03', '08-15', '11-01', '11-11', '12-25', '12-26'];
+  if (fixed.includes(md)) return true;
+  if (md === '12-24' && y >= 2025) return true;
+  const easter = easterSunday(y);
+  const date = new Date(y, m - 1, d);
+  const diffDays = Math.round((date - easter) / 86400000);
+  // Wielkanoc, Poniedziałek Wielkanocny, Zielone Świątki (+49), Boże Ciało (+60)
+  return [0, 1, 49, 60].includes(diffDays);
+}
+
+function isNonWorkingDay(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const wd = new Date(y, m - 1, d).getDay();
+  return wd === 0 || wd === 6 || isPolishHoliday(dateStr);
+}
+
+const pad2 = (n) => String(n).padStart(2, '0');
+
+// Date → "HH:MM"
+function hhmm(d) {
+  return d ? `${pad2(d.getHours())}:${pad2(d.getMinutes())}` : '--:--';
+}
+
+// Sekundy → "G:MM" (opcjonalnie ze znakiem)
+function formatHM(totalSeconds, showSign = false) {
+  const neg = totalSeconds < 0;
+  const abs = Math.abs(Math.round(totalSeconds || 0));
+  const text = `${Math.floor(abs / 3600)}:${pad2(Math.floor((abs % 3600) / 60))}`;
+  if (neg) return `−${text}`;
+  return showSign && abs >= 60 ? `+${text}` : text;
+}
+
+function setText(id, text, color) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  if (color !== undefined) el.style.color = color;
+}
+
+// Dziś przepracowane (praca + służbowe) na żywo
+function todayWorkedSeconds() {
+  if (!currentStats) return 0;
+  let worked = currentStats.today_closed_work_seconds || 0;
+  const openSince = parseLocalTimestamp(currentStats.open_work_since);
+  if (openSince !== null) {
+    worked += Math.max(0, Math.floor((Date.now() - openSince.getTime()) / 1000));
+  }
+  return worked;
+}
+
+// Dziś na wyjściach prywatnych na żywo (zamknięte z backendu + trwające)
+function todayPrivateSeconds() {
+  let total = currentStats ? (currentStats.today_private_break_seconds || 0) : 0;
+  const open = todayLogs.find(l => !l.time_out && l.event_type === 'break_private');
+  const since = open ? parseLocalTimestamp(open.time_in) : null;
+  if (since) total += Math.max(0, Math.floor((Date.now() - since.getTime()) / 1000));
+  return total;
+}
+
+// Stan dnia liczony z faktycznie przepracowanego czasu.
+// toFull / toZero > 0 → tyle pracy zostało; ≤ 0 → próg osiągnięty (nadwyżka = −wartość).
+// Prognozy godzin zakładają pracę bez przerw od teraz – tylko gdy dzień trwa.
+function computeDayState() {
+  const s = currentStats;
+  const now = new Date();
+  const norm = s.daily_target_seconds || 0;
+  const worked = todayWorkedSeconds();
+  const firstIn = parseLocalTimestamp(s.today_first_in);
+  const openSince = parseLocalTimestamp(s.open_work_since);
+  const hasOpen = !!s.today_has_open_session;
+  const freeDay = norm === 0; // weekend / święto
+  const toFull = norm - worked;
+  const toZero = norm - (s.previous_days_balance_seconds || 0) - worked;
+
+  const projFull = hasOpen && !freeDay && toFull > 0 ? new Date(now.getTime() + toFull * 1000) : null;
+  const projZero = hasOpen && toZero > 0 ? new Date(now.getTime() + toZero * 1000) : null;
+
+  // Moment osiągnięcia progu – znany, gdy nastąpił w trakcie bieżącej, nieprzerwanej sesji pracy
+  const reachedAt = (overSeconds) => {
+    if (openSince === null) return null;
+    const t = now.getTime() - overSeconds * 1000;
+    return t >= openSince.getTime() ? new Date(t) : null;
+  };
+  const fullAt = !freeDay && toFull <= 0 ? reachedAt(-toFull) : null;
+  const zeroAt = toZero <= 0 ? reachedAt(-toZero) : null;
+
+  return { now, norm, worked, firstIn, hasOpen, isWorking: openSince !== null, freeDay,
+    toFull, toZero, projFull, projZero, fullAt, zeroAt };
+}
+
+// Liczniki (co sekundę) + oś dnia i ostatnie dni (raz na minutę lub po zmianie danych)
+function renderToday(force = false) {
+  if (!currentStats) return;
+  const st = computeDayState();
+
+  // Przepracowano
+  setText('stat-worked', formatSeconds(st.worked));
+  setText('stat-worked-sub', st.firstIn
+    ? `od ${hhmm(st.firstIn)} · prywatne ${formatHM(todayPrivateSeconds())}`
+    : 'praca jeszcze nierozpoczęta');
+
+  // Do pełnego dnia
+  if (st.freeDay) {
+    setText('stat-to-full', '—', 'inherit');
+    setText('stat-to-full-sub', 'dzień wolny – całość to nadgodziny');
+  } else if (st.toFull > 0) {
+    setText('stat-to-full', formatSeconds(st.toFull), 'inherit');
+    setText('stat-to-full-sub', st.projFull
+      ? `pełny dzień o ${hhmm(st.projFull)}`
+      : (st.firstIn ? 'dzień zakończony' : `norma ${formatHM(st.norm)}`));
+  } else {
+    setText('stat-to-full', `+${formatSeconds(-st.toFull)}`, 'var(--accent)');
+    setText('stat-to-full-sub', st.fullAt ? `osiągnięto o ${hhmm(st.fullAt)}` : 'norma osiągnięta');
+  }
+
+  // Do zera
+  if (st.toZero > 0) {
+    setText('stat-to-zero', formatSeconds(st.toZero), 'inherit');
+    setText('stat-to-zero-sub', st.projZero
+      ? `na zero o ${hhmm(st.projZero)}`
+      : (st.firstIn ? 'dzień zakończony' : 'od rozpoczęcia pracy'));
+  } else {
+    setText('stat-to-zero', `+${formatSeconds(-st.toZero)}`, 'var(--accent)');
+    setText('stat-to-zero-sub', st.zeroAt ? `osiągnięto o ${hhmm(st.zeroAt)}` : 'saldo na zero osiągnięte');
+  }
+
+  setText('stat-balance-sub', MONTHS_NOMINATIVE[st.now.getMonth()]);
+  setText('nav-today-worked', st.firstIn ? formatHM(st.worked) : '');
+
+  const key = `${hhmm(st.now)}|${todayLogs.length}|${st.hasOpen}|${st.isWorking}`;
+  if (force || key !== lastAxisRenderKey) {
+    lastAxisRenderKey = key;
+    renderDayAxis(st);
+    renderRecentDays(st);
+  }
+}
+
+function renderDayAxis(st) {
+  const el = document.getElementById('day-axis');
+  if (!el) return;
+  if (todayLogs.length === 0) {
+    el.innerHTML = '<p class="axis-empty">Brak wpisów z dzisiaj – oś pojawi się po rozpoczęciu pracy.</p>';
+    return;
+  }
+
+  const now = st.now;
+  const dayStart = new Date(now);
+  dayStart.setHours(0, 0, 0, 0);
+  const hourOf = (d) => (d.getTime() - dayStart.getTime()) / 3600000;
+
+  // Zakres osi: domyślnie 06–20, poszerzany o wpisy i prognozy (pełne parzyste godziny)
+  const hours = [hourOf(now)];
+  todayLogs.forEach(l => {
+    const a = parseLocalTimestamp(l.time_in);
+    const b = parseLocalTimestamp(l.time_out);
+    if (a) hours.push(hourOf(a));
+    if (b) hours.push(hourOf(b));
+  });
+  if (st.projFull) hours.push(hourOf(st.projFull));
+  if (st.projZero) hours.push(hourOf(st.projZero));
+  let lo = Math.min(6, Math.floor(Math.min(...hours)));
+  let hi = Math.max(20, Math.ceil(Math.max(...hours)));
+  lo = Math.max(0, lo - (lo % 2));
+  hi = Math.min(24, hi + (hi % 2));
+  const pos = (d) => Math.min(100, Math.max(0, (hourOf(d) - lo) / (hi - lo) * 100));
+  const edgeClass = (p) => (p < 6 ? 'edge-left' : p > 94 ? 'edge-right' : '');
+
+  // Bloki wpisów
+  const blocks = todayLogs.map(l => {
+    const a = parseLocalTimestamp(l.time_in);
+    if (!a) return '';
+    const b = parseLocalTimestamp(l.time_out) || now;
+    const left = pos(a);
+    const width = Math.max(0, pos(b) - left);
+    const dur = Math.max(0, Math.floor((b - a) / 1000));
+    const label = width > 12 ? `${eventShort[l.event_type] || ''} · ${formatHM(dur)}` : '';
+    const title = `${eventLabels[l.event_type] || l.event_type}: ${hhmm(a)}–${l.time_out ? hhmm(b) : 'teraz'} (${formatHM(dur)})`;
+    return `<div class="axis-block ${l.event_type}" style="left: ${left}%; width: ${width}%;" title="${title}">${label}</div>`;
+  }).join('');
+
+  // Prognoza do końca dnia: paski do pełnego dnia, przerywana ramka do zera
+  const nowP = pos(now);
+  let plan = '';
+  if (st.projFull) {
+    plan += `<div class="axis-plan" style="left: ${nowP}%; width: ${pos(st.projFull) - nowP}%;"></div>`;
+  }
+  if (st.projZero) {
+    const from = st.projFull && st.projFull < st.projZero ? st.projFull : now;
+    if (st.projZero > from) {
+      plan += `<div class="axis-plan axis-plan-zero" style="left: ${pos(from)}%; width: ${pos(st.projZero) - pos(from)}%;"></div>`;
+    }
+  }
+
+  // Znaczniki: wejście, pełny dzień, na zero
+  const marks = [];
+  if (st.firstIn) marks.push({ p: pos(st.firstIn), time: hhmm(st.firstIn), text: 'wejście', cls: '', line: false });
+  const fullTime = st.projFull || st.fullAt;
+  if (!st.freeDay && fullTime) {
+    marks.push({ p: pos(fullTime), time: hhmm(fullTime), text: 'pełny dzień', cls: st.fullAt ? 'reached' : '', line: true });
+  }
+  const zeroTime = st.projZero || st.zeroAt;
+  if (zeroTime) {
+    marks.push({ p: pos(zeroTime), time: hhmm(zeroTime), text: 'na zero', cls: st.zeroAt ? 'reached' : 'zero', line: true });
+  }
+  marks.sort((x, y) => x.p - y.p);
+  // Etykiety blisko siebie idą do drugiego rzędu
+  const lastInRow = [-100, -100];
+  marks.forEach(mk => {
+    mk.row = mk.p - lastInRow[0] >= 13 ? 0 : (mk.p - lastInRow[1] >= 13 ? 1 : 0);
+    lastInRow[mk.row] = mk.p;
+  });
+  const rows = marks.some(mk => mk.row === 1) ? 2 : 1;
+
+  const lines = marks.filter(mk => mk.line)
+    .map(mk => `<div class="axis-mark ${mk.cls}" style="left: ${mk.p}%;"></div>`).join('');
+  const labels = marks.map(mk =>
+    `<div class="axis-label ${mk.cls} ${edgeClass(mk.p)}" style="left: ${mk.p}%; top: ${mk.row * 38}px;"><b>${mk.time}</b><span>${mk.text}</span></div>`
+  ).join('');
+
+  const ticks = [];
+  for (let h = lo; h <= hi; h += 2) ticks.push(`<span>${pad2(h)}</span>`);
+
+  el.innerHTML = `
+    <div class="axis-now-row"><div class="axis-now ${edgeClass(nowP)}" style="left: ${nowP}%;">teraz ${hhmm(now)}</div></div>
+    <div class="axis-track">${blocks}${plan}${lines}<div class="axis-line" style="left: ${nowP}%;"></div></div>
+    <div class="axis-labels" style="height: ${rows * 38}px;">${labels}</div>
+    <div class="axis-ticks">${ticks.join('')}</div>`;
+}
+
+function renderRecentDays(st) {
+  const el = document.getElementById('recent-days');
+  if (!el) return;
+
+  const rows = recentDays.map(d => ({
+    date: d.date, seconds: d.seconds, norm: isNonWorkingDay(d.date) ? 0 : defaultTargetSeconds, live: false
+  }));
+  if (st.firstIn) rows.push({ date: localDateString(st.now), seconds: st.worked, norm: st.norm, live: true });
+
+  if (rows.length === 0) {
+    el.innerHTML = '<p class="axis-empty">Brak wcześniejszych dni z pracą.</p>';
+    return;
+  }
+
+  const scale = Math.max(10 * 3600, defaultTargetSeconds * 1.25, ...rows.map(r => r.seconds));
+  el.innerHTML = rows.map(r => {
+    const [y, m, d] = r.date.split('-').map(Number);
+    const wd = WEEKDAYS_SHORT[new Date(y, m - 1, d).getDay()];
+    const bal = r.seconds - r.norm;
+    const running = r.live && st.hasOpen;
+    const balText = running ? 'trwa' : formatHM(bal, true);
+    const balColor = running ? 'var(--text-muted)' : (bal >= 0 ? 'var(--positive)' : 'var(--negative)');
+    const normMark = r.norm > 0 ? `<div class="recent-norm" style="left: ${r.norm / scale * 100}%;"></div>` : '';
+    return `<div class="recent-row">
+      <span class="recent-day"><b>${wd}</b> ${d}.${pad2(m)}</span>
+      <div class="recent-bar"><div class="recent-fill ${running ? 'live' : ''}" style="width: ${Math.min(100, r.seconds / scale * 100)}%;"></div>${normMark}</div>
+      <span class="recent-val">${formatHM(r.seconds)}</span>
+      <span class="recent-bal" style="color: ${balColor};">${balText}</span>
+    </div>`;
+  }).join('');
+}
+
+// Dane do ekranu Dziś: dzisiejsze wpisy i ostatnie dni (zawsze zalogowany użytkownik, bieżący miesiąc;
+// poprzedni miesiąc dociągany, gdy w bieżącym jest mniej niż 5 dni z pracą)
+async function loadTodayData() {
+  if (!currentUser) return;
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
+  const today = localDateString(now);
+  try {
+    const [logs, target] = await Promise.all([
+      invoke('get_logs', { userId: Number(currentUser.id), year: y, month: m }),
+      invoke('get_daily_target_seconds')
+    ]);
+    defaultTargetSeconds = Number(target) || 28800;
+    let all = logs || [];
+    const pastDates = new Set(all.filter(l => l.date < today).map(l => l.date));
+    if (pastDates.size < 5) {
+      const prev = await invoke('get_logs', {
+        userId: Number(currentUser.id), year: m === 1 ? y - 1 : y, month: m === 1 ? 12 : m - 1
+      });
+      all = all.concat(prev || []);
+    }
+
+    todayLogs = all.filter(l => l.date === today).sort((a, b) => a.time_in.localeCompare(b.time_in));
+
+    const totals = {};
+    all.forEach(l => {
+      if (l.date < today && (l.event_type === 'work' || l.event_type === 'business') && l.duration_seconds) {
+        totals[l.date] = (totals[l.date] || 0) + l.duration_seconds;
+      }
+    });
+    recentDays = Object.keys(totals).sort().slice(-5).map(date => ({ date, seconds: totals[date] }));
+  } catch (err) {
+    console.error('Błąd ładowania danych dnia:', err);
+  }
+}
+
 // Lokalna data w formacie YYYY-MM-DD (bez przesunięcia UTC)
 function localDateString(d = new Date()) {
   const y = d.getFullYear();
@@ -398,6 +687,7 @@ setInterval(() => {
   }
 
   if (currentStats) {
+    renderToday();
     renderLeaveTime();
     renderBalance();
   }
@@ -440,19 +730,15 @@ async function updateUI() {
     // Zapisujemy odebrany obiekt do zmiennej globalnej
     currentStats = stats;
 
-    // Wywołujemy naszą funkcję przełączającą godzinę wyjścia
+    // Ekran Dziś: dzisiejsze wpisy + ostatnie dni, potem liczniki i oś dnia
+    await loadTodayData();
+    renderToday(true);
+
+    // Powiadomienia "na zero" / "pełny dzień"
     renderLeaveTime();
 
-    document.getElementById('stat-first-in').textContent = stats.today_first_in 
-      ? (stats.today_first_in.split(' ')[1] || stats.today_first_in) 
-      : '--:--';
-    
-    // Usunięto stat-target-leave.textContent, ponieważ obsługuje go renderLeaveTime()
-    
     // Saldo miesięczne (po przekroczeniu normy dnia liczone na żywo – patrz renderBalance)
     renderBalance();
-
-    document.getElementById('stat-break').textContent = formatSeconds(stats.today_private_break_seconds, false);
 
     // 2. Pobieranie logów z wybranego miesiąca dla wybranego użytkownika
     const logs = await invoke('get_logs', { 

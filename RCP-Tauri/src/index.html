@@ -54,6 +54,7 @@
           <button id="nav-dashboard" class="nav-btn active">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
             Dziś
+            <span id="nav-today-worked" class="nav-badge"></span>
           </button>
           <button id="nav-reports" class="nav-btn">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M16 3v4M8 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01"></path></svg>
@@ -106,26 +107,51 @@
 
           <p id="status-msg" class="status-msg">Gotowy do rejestracji czasu.</p>
 
+          <!-- Oś dnia (rysowana w main.js: renderDayAxis) -->
+          <section class="panel" aria-labelledby="h-day-axis">
+            <div class="panel-head">
+              <h2 id="h-day-axis" class="panel-title">Oś dnia</h2>
+              <div class="legend" aria-hidden="true">
+                <span class="legend-item"><span class="swatch swatch-work"></span>praca</span>
+                <span class="legend-item"><span class="swatch swatch-private"></span>prywatne</span>
+                <span class="legend-item"><span class="swatch swatch-business"></span>służbowe</span>
+                <span class="legend-item"><span class="swatch swatch-plan"></span>do końca dnia</span>
+              </div>
+            </div>
+            <div id="day-axis"></div>
+          </section>
+
+          <!-- Liczniki dnia (aktualizowane co sekundę) -->
           <section class="stat-strip" aria-label="Liczniki dnia">
             <div class="stat">
-              <span class="stat-label">Wejście dziś</span>
-              <span id="stat-first-in" class="stat-value">--:--</span>
+              <span class="stat-label">Przepracowano dziś</span>
+              <span id="stat-worked" class="stat-value">0:00:00</span>
+              <span id="stat-worked-sub" class="stat-sub"></span>
             </div>
-            <button type="button" class="stat stat-toggle" id="card-toggle-leave" title="Kliknij, aby przełączyć: na zero / pełny dzień">
-              <span class="stat-label">
-                <span id="stat-leave-label">Wyjście – na zero</span>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 1l4 4-4 4"></path><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><path d="M7 23l-4-4 4-4"></path><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
-              </span>
-              <span id="stat-target-leave" class="stat-value">--:--</span>
-            </button>
+            <div class="stat">
+              <span class="stat-label">Do pełnego dnia</span>
+              <span id="stat-to-full" class="stat-value">--:--</span>
+              <span id="stat-to-full-sub" class="stat-sub"></span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Do zera</span>
+              <span id="stat-to-zero" class="stat-value">--:--</span>
+              <span id="stat-to-zero-sub" class="stat-sub"></span>
+            </div>
             <div class="stat">
               <span class="stat-label">Saldo miesiąca</span>
               <span id="stat-balance" class="stat-value">0:00:00</span>
+              <span id="stat-balance-sub" class="stat-sub"></span>
             </div>
-            <div class="stat">
-              <span class="stat-label">Prywatne dziś</span>
-              <span id="stat-break" class="stat-value stat-value-private">0:00:00</span>
+          </section>
+
+          <!-- Ostatnie dni z pracą + dziś -->
+          <section class="panel" aria-labelledby="h-recent">
+            <div class="panel-head">
+              <h2 id="h-recent" class="panel-title">Ostatnie dni</h2>
+              <span class="legend">kreska = norma</span>
             </div>
+            <div id="recent-days" class="recent"></div>
           </section>
         </section>
 
