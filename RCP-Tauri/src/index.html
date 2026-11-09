@@ -3,277 +3,346 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Time Tracker RCP</title>
+  <title>RCP Time Tracker</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
 
   <!-- EKRAN LOGOWANIA -->
-  <main id="login-screen" class="container">
-    <h1>Logowanie</h1>
-    <form id="login-form">
-      <div style="margin-bottom: 12px;">
-        <label style="display:block; margin-bottom: 4px;">Login:</label>
-        <input type="text" id="username" required placeholder="np. admin" style="width: 100%; box-sizing: border-box;" />
-      </div>
-      <div style="margin-bottom: 12px;">
-        <label style="display:block; margin-bottom: 4px;">Hasło:</label>
-        <input type="password" id="password" required placeholder="••••••••" style="width: 100%; box-sizing: border-box;" />
-      </div>
-      <div style="margin-bottom: 12px;">
-        <input type="checkbox" id="remember-me" checked />
-        <label for="remember-me">Zapamiętaj mnie</label>
-      </div>
-      <button type="submit" class="btn-green" style="width: 100%; margin-top: 10px;">Zaloguj się</button>
-    </form>
-    <p id="login-error" style="color: #f38ba8; text-align: center; margin-top: 10px;"></p>
+  <main id="login-screen">
+    <div class="login-wrap">
+      <form id="login-form" class="login-card">
+        <div class="brand" style="padding: 0;">
+          <span class="brand-mark">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+          </span>
+          <span>RCP</span>
+        </div>
+        <h1>Logowanie</h1>
+        <div class="field">
+          <label for="username">Login</label>
+          <input type="text" id="username" required placeholder="np. admin" autocomplete="username" />
+        </div>
+        <div class="field">
+          <label for="password">Hasło</label>
+          <input type="password" id="password" required placeholder="••••••••" autocomplete="current-password" />
+        </div>
+        <label class="check" for="remember-me">
+          <input type="checkbox" id="remember-me" checked />
+          Zapamiętaj mnie
+        </label>
+        <button type="submit" class="btn btn-light btn-block">Zaloguj się</button>
+        <p id="login-error" class="login-error"></p>
+      </form>
+    </div>
   </main>
 
   <!-- GŁÓWNY EKRAN APLIKACJI -->
-  <main id="app-screen" class="container" style="display: none;">
-    <!-- Górny Pasek i Nawigacja -->
-    <header style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #45475a; padding-bottom: 10px; margin-bottom: 15px;">
-      <nav style="display: flex; gap: 10px;">
-        <button id="nav-dashboard" class="nav-btn active" style="padding: 8px 16px;">Dashboard Dzienny</button>
-        <button id="nav-reports" class="nav-btn" style="padding: 8px 16px;">Podsumowanie & Wykresy</button>
-        <button id="nav-settings" class="nav-btn" style="padding: 8px 16px;">Ustawienia</button>
-        <button id="nav-absences" class="nav-btn" style="padding: 8px 16px;">Urlopy & L4</button>
-      </nav>
-      <div>
-        <span id="user-info" style="margin-right: 15px; font-weight: bold;"></span>
-        <button id="btn-logout" style="padding: 5px 10px; background: #f38ba8; color: #11111b; border: none; border-radius: 4px; cursor: pointer;">Wyloguj</button>
-      </div>
-    </header>
+  <div id="app-screen" style="display: none;">
+    <div class="app-shell">
 
-    <!-- WIDOK 1: DASHBOARD DZIENNY -->
-    <section id="view-dashboard">
-      <div class="controls-grid">
-        <button id="btn-start" class="btn-green">Start Pracy</button>
-        <button id="btn-stop" class="btn-red">Stop Pracy</button>
-        <button id="btn-private" class="btn-orange">Wyjście Prywatne</button>
-        <button id="btn-business" class="btn-blue">Wyjście Służbowe</button>
-        <button id="btn-return" class="btn-green" style="display: none;">POWRÓT Z WYJŚCIA</button>
-      </div>
-
-      <p id="status-msg" style="text-align: center; margin: 10px 0;">Gotowy do rejestracji czasu.</p>
-
-      <div class="stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin: 20px 0;">
-        <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
-          <span style="font-size: 0.85em; color: #a6adc8;">Wejście dzisiaj</span>
-          <h2 id="stat-first-in" style="margin: 5px 0 0 0; color: #89b4fa;">--:--</h2>
+      <!-- Boczne menu -->
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+          </span>
+          <span>RCP</span>
         </div>
-        <!-- Znajdź dotychczasową kartę odpowiadającą za godzinę wyjścia i zamień ją na to: -->
-      <div class="card stat-card" id="card-toggle-leave" style="cursor: pointer; user-select: none;" title="Kliknij, aby przełączyć tryb wyjścia">
-        <small id="stat-leave-label" style="color: var(--subtext-color);">Wyjście (Na Zero) 🔄</small>
-        <h2 id="stat-target-leave">--:--</h2>
-      </div>
-        <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
-          <span style="font-size: 0.85em; color: #a6adc8;">Saldo Miesięczne</span>
-          <h2 id="stat-balance" style="margin: 5px 0 0 0;">0 min</h2>
+
+        <nav aria-label="Główna nawigacja">
+          <button id="nav-dashboard" class="nav-btn active">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+            Dziś
+          </button>
+          <button id="nav-reports" class="nav-btn">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M16 3v4M8 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01"></path></svg>
+            Miesiąc
+          </button>
+          <button id="nav-absences" class="nav-btn">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
+            Urlopy
+          </button>
+          <button id="nav-settings" class="nav-btn">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"></path></svg>
+            Ustawienia
+          </button>
+        </nav>
+
+        <div class="sidebar-user">
+          <span id="user-info"></span>
+          <button id="btn-logout" class="icon-btn icon-btn-plain" aria-label="Wyloguj" title="Wyloguj">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5"></path><path d="M21 12H9"></path></svg>
+          </button>
         </div>
-        <div class="card" style="background: #2b2b36; padding: 15px; border-radius: 8px; text-align: center;">
-          <span style="font-size: 0.85em; color: #a6adc8;">Prywatne dzisiaj</span>
-          <h2 id="stat-break" style="margin: 5px 0 0 0; color: #fab387;">0 min</h2>
-        </div>
-      </div>
-    </section>
+      </aside>
 
-   <!-- WIDOK 2: PODSUMOWANIE MIESIĘCZNE & WYKRESY -->
-<section id="view-reports" style="display: none;">
-  
-  <!-- Pasek filtrowania -->
-  <div class="card" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding: 12px 20px; flex-wrap: wrap; gap: 10px;">
-    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-      
-      <!-- Selekcja Pracownika (widoczna tylko dla Admina) -->
-      <div id="admin-user-select-container" style="display: none;">
-        <label style="font-weight: bold; margin-right: 5px;">Pracownik:</label>
-        <select id="select-user" style="padding: 6px 10px; font-weight: bold; color: var(--accent-blue);"></select>
-      </div>
+      <main class="app-main">
 
-      <div>
-        <label style="font-weight: bold; margin-right: 5px;">Okres:</label>
-        <select id="select-month" style="padding: 6px 10px;">
-          <option value="1">Styczeń</option>
-          <option value="2">Luty</option>
-          <option value="3">Marzec</option>
-          <option value="4">Kwiecień</option>
-          <option value="5">Maj</option>
-          <option value="6">Czerwiec</option>
-          <option value="7">Lipiec</option>
-          <option value="8">Sierpień</option>
-          <option value="9">Wrzesień</option>
-          <option value="10">Październik</option>
-          <option value="11">Listopad</option>
-          <option value="12">Grudzień</option>
-        </select>
-        <select id="select-year" style="padding: 6px 10px;"></select>
-      </div>
-    </div>
-
-    <div style="display: flex; gap: 10px;">
-      <button id="btn-export-csv" style="padding: 6px 12px; background: #89b4fa; color: #11111b;">Eksportuj CSV</button>
-      <label for="input-import-csv" style="padding: 6px 12px; background: #cba6f7; color: #11111b; font-weight: bold; border-radius: 6px; cursor: pointer;">Importuj CSV</label>
-      <input type="file" id="input-import-csv" accept=".csv" style="display: none;" />
-      <button id="btn-add-manual" style="padding: 6px 12px; background: #a6e3a1; color: #11111b;">+ Dodaj Wpis</button>
-    </div>
-  </div>
-
-  <p id="csv-msg" style="text-align: right; margin-top: -10px; margin-bottom: 10px;"></p>
-
-  <!-- SEKCJA WYKRESU PRZEPRACOWANYCH GODZIN -->
-  <div class="card" style="margin-bottom: 20px;">
-    <h3 style="margin-bottom: 15px;">Wykres Przepracowanych Godzin w Miesiącu</h3>
-    <div id="chart-container" style="display: flex; align-items: flex-end; gap: 6px; height: 160px; padding-top: 20px; border-bottom: 1px solid var(--border-color); overflow-x: auto;"></div>
-  </div>
-
-  <!-- TABELA Z HARMONOGRAMEM -->
-  <h3>Historia Wpisów</h3>
-  <div style="overflow-x: auto; border-radius: 8px;">
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Data</th>
-          <th>Start</th>
-          <th>Stop</th>
-          <th>Czas pracy</th>
-          <th>Typ</th>
-          <th>Akcje</th>
-        </tr>
-      </thead>
-      <tbody id="logs-table-body"></tbody>
-    </table>
-  </div>
-</section>
-    <!-- WIDOK 3: USTAWIENIA & ZARZĄDZANIE UŻYTKOWNIKAMI -->
-    <section id="view-settings" style="display: none;">
-      <h2>Ustawienia Aplikacji</h2>
-      
-      <!-- Ustawienie Normy Czasowej -->
-      <div class="card" style="background: #2b2b36; padding: 20px; border-radius: 8px; margin-bottom: 20px; max-width: 400px;">
-        <h3>Domyślna Dzienna Norma Pracy</h3>
-        <form id="form-settings-target">
-          <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px;">
+        <!-- WIDOK 1: DZIŚ -->
+        <section id="view-dashboard">
+          <div class="page-head">
             <div>
-              <label style="display:block; font-size: 0.85em;">Godziny:</label>
-              <input type="number" id="target-hours" min="0" max="24" value="8" style="width: 70px; padding: 5px;" />
+              <div class="eyebrow" id="today-weekday"></div>
+              <h1 id="today-date"></h1>
             </div>
-            <div>
-              <label style="display:block; font-size: 0.85em;">Minuty:</label>
-              <input type="number" id="target-minutes" min="0" max="59" value="0" style="width: 70px; padding: 5px;" />
+            <div class="action-group" role="group" aria-label="Rejestracja czasu">
+              <button id="btn-start" class="act act-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5l12 7-12 7z"></path></svg>
+                Start pracy
+              </button>
+              <button id="btn-return" class="act act-primary" style="display: none;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5l12 7-12 7z"></path></svg>
+                Powrót z wyjścia
+              </button>
+              <button id="btn-stop" class="act act-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+                Zakończ pracę
+              </button>
+              <button id="btn-private" class="act act-private"><span class="dot dot-private"></span>Prywatne</button>
+              <button id="btn-business" class="act act-business"><span class="dot dot-business"></span>Służbowe</button>
             </div>
           </div>
-          <button type="submit" class="btn-green" style="padding: 8px 15px;">Zapisz Normę</button>
-        </form>
-        <p id="target-msg" style="color: #a6e3a1; margin-top: 10px;"></p>
-      </div>
 
+          <p id="status-msg" class="status-msg">Gotowy do rejestracji czasu.</p>
 
-      <!-- Panel Admina: Tworzenie kont (Widoczny tylko dla roli 'admin') -->
-      <div id="admin-user-panel" class="card" style="background: #2b2b36; padding: 20px; border-radius: 8px; max-width: 400px; display: none;">
-        <h3>Zarządzanie Użytkownikami (Tylko Admin)</h3>
-        <form id="form-create-user">
-          <div style="margin-bottom: 10px;">
-            <label style="display:block;">Nowy Login:</label>
-            <input type="text" id="new-username" required style="width: 100%; box-sizing: border-box;" placeholder="np. jan.kowalski" />
-          </div>
-          <div style="margin-bottom: 10px;">
-            <label style="display:block;">Hasło:</label>
-            <input type="password" id="new-password" required style="width: 100%; box-sizing: border-box;" placeholder="••••••••" />
-          </div>
-          <div style="margin-bottom: 15px;">
-            <label style="display:block;">Rola:</label>
-            <select id="new-role" style="width: 100%; box-sizing: border-box; padding: 5px;">
-              <option value="user">Pracownik (User)</option>
-              <option value="admin">Administrator (Admin)</option>
-            </select>
-          </div>
-          <button type="submit" class="btn-blue" style="width: 100%; padding: 8px;">Utwórz Konto</button>
-        </form>
-        <p id="create-user-msg" style="margin-top: 10px; text-align: center;"></p>
-      </div>
-    </section>
-
-    <!-- WIDOK 4: URLOPY I L4 -->
-    <section id="view-absences" style="display: none;">
-      <h2>Zgłaszanie Nieobecności (Urlopy / L4)</h2>
-
-      <div style="display: grid; grid-template-columns: 320px 1fr; gap: 20px;">
-        <!-- Formularz dodawania urlopu -->
-        <div class="card" style="background: #2b2b36; padding: 20px; border-radius: 8px; height: fit-content;">
-          <h3>Zgłoś Nieobecność</h3>
-          <form id="form-add-absence">
-            <div style="margin-bottom: 10px;">
-              <label style="display:block;">Data Od:</label>
-              <input type="date" id="absence-start" required style="width: 100%; box-sizing: border-box;" />
+          <section class="stat-strip" aria-label="Liczniki dnia">
+            <div class="stat">
+              <span class="stat-label">Wejście dziś</span>
+              <span id="stat-first-in" class="stat-value">--:--</span>
             </div>
-            <div style="margin-bottom: 10px;">
-              <label style="display:block;">Data Do:</label>
-              <input type="date" id="absence-end" required style="width: 100%; box-sizing: border-box;" />
+            <button type="button" class="stat stat-toggle" id="card-toggle-leave" title="Kliknij, aby przełączyć: na zero / pełny dzień">
+              <span class="stat-label">
+                <span id="stat-leave-label">Wyjście – na zero</span>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 1l4 4-4 4"></path><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><path d="M7 23l-4-4 4-4"></path><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+              </span>
+              <span id="stat-target-leave" class="stat-value">--:--</span>
+            </button>
+            <div class="stat">
+              <span class="stat-label">Saldo miesiąca</span>
+              <span id="stat-balance" class="stat-value">0:00:00</span>
             </div>
-            <div style="margin-bottom: 15px;">
-              <label style="display:block;">Typ nieobecności:</label>
-              <select id="absence-type" style="width: 100%; box-sizing: border-box; padding: 5px;">
-                <option value="vacation">Urlop Wypoczynkowy</option>
-                <option value="sick_leave">Zwolnienie Lekarskie (L4)</option>
-                <option value="other">Inna Nieobecność</option>
+            <div class="stat">
+              <span class="stat-label">Prywatne dziś</span>
+              <span id="stat-break" class="stat-value stat-value-private">0:00:00</span>
+            </div>
+          </section>
+        </section>
+
+        <!-- WIDOK 2: MIESIĄC (dawniej Raporty) -->
+        <section id="view-reports" style="display: none;">
+          <div class="page-head">
+            <div class="month-picker">
+              <!-- Selekcja Pracownika (widoczna tylko dla Admina) -->
+              <div id="admin-user-select-container" class="admin-user-select" style="display: none;">
+                <label for="select-user">Pracownik</label>
+                <select id="select-user"></select>
+              </div>
+              <button type="button" id="btn-month-prev" class="icon-btn icon-btn-plain" aria-label="Poprzedni miesiąc">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
+              </button>
+              <select id="select-month" aria-label="Miesiąc">
+                <option value="1">Styczeń</option>
+                <option value="2">Luty</option>
+                <option value="3">Marzec</option>
+                <option value="4">Kwiecień</option>
+                <option value="5">Maj</option>
+                <option value="6">Czerwiec</option>
+                <option value="7">Lipiec</option>
+                <option value="8">Sierpień</option>
+                <option value="9">Wrzesień</option>
+                <option value="10">Październik</option>
+                <option value="11">Listopad</option>
+                <option value="12">Grudzień</option>
               </select>
+              <select id="select-year" aria-label="Rok"></select>
+              <button type="button" id="btn-month-next" class="icon-btn icon-btn-plain" aria-label="Następny miesiąc">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg>
+              </button>
             </div>
-            <button type="submit" class="btn-green" style="width: 100%; padding: 8px;">Zapisz Nieobecność</button>
-          </form>
-          <p id="absence-msg" style="margin-top: 10px; text-align: center;"></p>
-        </div>
 
-        <!-- Tabela zarejestrowanych absencji -->
-        <div>
-          <h3>Zarejestrowane Nieobecności</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Data</th>
-                <th>Typ Nieobecności</th>
-                <th>Akcje</th>
-              </tr>
-            </thead>
-            <tbody id="absences-table-body"></tbody>
-          </table>
-        </div>
+            <div class="toolbar">
+              <label for="input-import-csv" class="icon-btn" title="Importuj CSV" aria-label="Importuj CSV">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M17 8l-5-5-5 5"></path><path d="M12 3v12"></path></svg>
+              </label>
+              <input type="file" id="input-import-csv" accept=".csv" style="display: none;" />
+              <button type="button" id="btn-export-csv" class="icon-btn" title="Eksportuj CSV" aria-label="Eksportuj CSV">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M7 10l5 5 5-5"></path><path d="M12 15V3"></path></svg>
+              </button>
+              <button type="button" id="btn-add-manual" class="btn btn-light">+ Dodaj wpis</button>
+            </div>
+          </div>
+
+          <p id="csv-msg" class="inline-msg"></p>
+
+          <section class="panel" aria-label="Wykres godzin">
+            <h2 class="panel-title">Godziny dziennie</h2>
+            <div id="chart-container" class="chart"></div>
+          </section>
+
+          <section class="panel panel-flush" aria-label="Wpisy">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Dzień</th>
+                    <th>Start</th>
+                    <th>Stop</th>
+                    <th>Czas</th>
+                    <th>Typ</th>
+                    <th><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);">Akcje</span></th>
+                  </tr>
+                </thead>
+                <tbody id="logs-table-body"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <!-- WIDOK 3: USTAWIENIA -->
+        <section id="view-settings" style="display: none;">
+          <div class="page-head">
+            <h1>Ustawienia</h1>
+          </div>
+
+          <section class="settings-section" aria-labelledby="s-czas">
+            <h2 id="s-czas" class="section-title">Czas pracy</h2>
+            <form id="form-settings-target" class="setting-row">
+              <div class="setting-text">
+                <div class="setting-name">Dzienna norma</div>
+                <div class="setting-hint">Nie działa wstecz – nowa norma obowiązuje od dziś</div>
+                <p id="target-msg" class="inline-msg" style="margin: 6px 0 0;"></p>
+              </div>
+              <div class="time-inputs">
+                <input type="number" id="target-hours" min="0" max="24" value="8" aria-label="Godziny" />
+                <span class="sep">:</span>
+                <input type="number" id="target-minutes" min="0" max="59" value="0" aria-label="Minuty" />
+              </div>
+              <button type="submit" class="btn btn-light">Zapisz</button>
+            </form>
+          </section>
+
+          <!-- Panel Admina: Tworzenie kont (Widoczny tylko dla roli 'admin') -->
+          <section id="admin-user-panel" class="settings-section" style="display: none;" aria-labelledby="s-users">
+            <h2 id="s-users" class="section-title">Użytkownicy (admin)</h2>
+            <form id="form-create-user" class="setting-row" style="align-items: flex-end;">
+              <div class="field" style="flex: 1 1 160px;">
+                <label for="new-username">Nowy login</label>
+                <input type="text" id="new-username" required placeholder="np. jan.kowalski" />
+              </div>
+              <div class="field" style="flex: 1 1 160px;">
+                <label for="new-password">Hasło</label>
+                <input type="password" id="new-password" required placeholder="••••••••" />
+              </div>
+              <div class="field" style="flex: 1 1 160px;">
+                <label for="new-role">Rola</label>
+                <select id="new-role">
+                  <option value="user">Pracownik (user)</option>
+                  <option value="admin">Administrator (admin)</option>
+                </select>
+              </div>
+              <button type="submit" class="btn btn-light">Utwórz konto</button>
+              <p id="create-user-msg" class="inline-msg" style="flex-basis: 100%; margin: 0;"></p>
+            </form>
+          </section>
+        </section>
+
+        <!-- WIDOK 4: URLOPY I L4 -->
+        <section id="view-absences" style="display: none;">
+          <div class="page-head">
+            <h1>Urlopy i nieobecności</h1>
+          </div>
+
+          <div class="split">
+            <!-- Formularz dodawania urlopu -->
+            <section class="panel split-side" aria-labelledby="h-absence-new">
+              <h2 id="h-absence-new" class="panel-title">Nowa nieobecność</h2>
+              <form id="form-add-absence" class="form-stack">
+                <div class="field">
+                  <label for="absence-type">Typ</label>
+                  <select id="absence-type">
+                    <option value="vacation">Urlop wypoczynkowy</option>
+                    <option value="sick_leave">Zwolnienie lekarskie (L4)</option>
+                    <option value="other">Inna nieobecność</option>
+                  </select>
+                </div>
+                <div class="field-row">
+                  <div class="field">
+                    <label for="absence-start">Od</label>
+                    <input type="date" id="absence-start" required />
+                  </div>
+                  <div class="field">
+                    <label for="absence-end">Do</label>
+                    <input type="date" id="absence-end" required />
+                  </div>
+                </div>
+                <button type="submit" class="btn btn-light btn-block">Zapisz nieobecność</button>
+                <p id="absence-msg" class="inline-msg" style="margin: 0;"></p>
+              </form>
+            </section>
+
+            <!-- Tabela zarejestrowanych absencji -->
+            <section class="panel panel-flush split-main" aria-label="Zarejestrowane nieobecności">
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Data</th>
+                      <th>Typ</th>
+                      <th><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);">Akcje</span></th>
+                    </tr>
+                  </thead>
+                  <tbody id="absences-table-body"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- OKNO EDYCJI / DODAWANIA WPISU -->
+  <dialog id="edit-dialog" aria-labelledby="dialog-title">
+    <form id="edit-form" method="dialog" class="form-stack">
+      <div class="dialog-head" style="margin-bottom: 0;">
+        <h2 id="dialog-title">Edytuj wpis</h2>
+        <button type="button" id="btn-dialog-close" class="icon-btn icon-btn-plain" aria-label="Zamknij">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"></path></svg>
+        </button>
       </div>
-    </section>
-  </main>
-
-  <!-- MODAL DO EDYCJI / DODAWANIA WPISU -->
-  <dialog id="edit-dialog" style="background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-radius: 8px; padding: 20px; width: 320px;">
-    <form id="edit-form" method="dialog">
-      <h3 id="dialog-title" style="margin-top: 0;">Edycja Wpisu</h3>
       <input type="hidden" id="edit-id" />
 
-      <div style="margin-bottom: 10px;">
-        <label style="display:block;">Data:</label>
-        <input type="date" id="edit-date" required style="width: 100%; box-sizing: border-box;" />
-      </div>
-      <div style="margin-bottom: 10px;">
-        <label style="display:block;">Godzina Start (GG:MM lub GG:MM:SS):</label>
-        <input type="text" id="edit-time-in" required placeholder="08:00:00" style="width: 100%; box-sizing: border-box;" />
-      </div>
-      <div style="margin-bottom: 10px;">
-        <label style="display:block;">Godzina Stop (GG:MM lub GG:MM:SS, puste = w trakcie):</label>
-        <input type="text" id="edit-time-out" placeholder="16:00:00" style="width: 100%; box-sizing: border-box;" />
-      </div>
-      <div style="margin-bottom: 15px;">
-        <label style="display:block;">Typ zdarzenia:</label>
-        <select id="edit-event-type" style="width: 100%; box-sizing: border-box; padding: 5px;">
+      <div class="field">
+        <label for="edit-event-type">Typ</label>
+        <select id="edit-event-type">
           <option value="work">Praca przy biurku</option>
           <option value="break_private">Wyjście prywatne</option>
           <option value="business">Wyjście służbowe</option>
         </select>
       </div>
 
-      <div style="display: flex; justify-content: space-between;">
-        <button type="button" id="btn-dialog-cancel" style="background: #6c7086;">Anuluj</button>
-        <button type="submit" class="btn-green">Zapisz</button>
+      <div class="field">
+        <label for="edit-date">Data</label>
+        <input type="date" id="edit-date" required />
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="edit-time-in">Start</label>
+          <input type="text" id="edit-time-in" class="time-big" required placeholder="08:00" />
+        </div>
+        <div class="field">
+          <label for="edit-time-out">Stop</label>
+          <input type="text" id="edit-time-out" class="time-big" placeholder="puste = trwa" />
+        </div>
+      </div>
+      <p class="setting-hint">Format GG:MM lub GG:MM:SS. Puste „Stop” = wpis w trakcie.</p>
+
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" id="btn-dialog-cancel" class="btn btn-ghost">Anuluj</button>
+        <button type="submit" class="btn btn-light">Zapisz</button>
       </div>
     </form>
   </dialog>

@@ -140,9 +140,9 @@ const eventLabels = {
 };
 
 const absenceLabels = {
-  'vacation': 'Urlop Wypoczynkowy',
-  'sick_leave': 'Zwolnienie Lekarskie (L4)',
-  'other': 'Inna Nieobecność'
+  'vacation': 'Urlop wypoczynkowy',
+  'sick_leave': 'Zwolnienie lekarskie (L4)',
+  'other': 'Inna nieobecność'
 };
 
 // 2. Inicjalizacja Aplikacji i Sesji
@@ -168,7 +168,8 @@ function showLoginScreen() {
 function showAppScreen() {
   loginScreen.style.display = 'none';
   appScreen.style.display = 'block';
-  userInfo.textContent = `Zalogowany: ${currentUser.username} (${currentUser.role})`;
+  userInfo.textContent = currentUser.username;
+  userInfo.title = `Zalogowany: ${currentUser.username} (${currentUser.role})`;
   
   if (currentUser.role === 'admin') {
     adminUserPanel.style.display = 'block';
@@ -286,15 +287,15 @@ function renderLeaveTime() {
   const isStandardPassed = standardDate !== null && now >= standardDate;
 
   if (showZeroLeaveMode) {
-    if (statLeaveLabel) statLeaveLabel.textContent = "Wyjście (Na Zero) 🔄";
+    if (statLeaveLabel) statLeaveLabel.textContent = "Wyjście – na zero";
     statTargetLeave.textContent = formatLeaveTime(zeroDate);
-    // Zmiana koloru czcionki na zielony po osiągnięciu progu Na Zero
-    statTargetLeave.style.color = isZeroPassed ? '#a6e3a1' : 'inherit';
+    // Kolor akcentu po osiągnięciu progu Na Zero
+    statTargetLeave.style.color = isZeroPassed ? 'var(--accent)' : 'inherit';
   } else {
-    if (statLeaveLabel) statLeaveLabel.textContent = "Wyjście (Pełny Dzień) 🔄";
+    if (statLeaveLabel) statLeaveLabel.textContent = "Wyjście – pełny dzień";
     statTargetLeave.textContent = formatLeaveTime(standardDate);
-    // Zmiana koloru czcionki na zielony po osiągnięciu 8h
-    statTargetLeave.style.color = isStandardPassed ? '#a6e3a1' : 'inherit';
+    // Kolor akcentu po osiągnięciu pełnego dnia
+    statTargetLeave.style.color = isStandardPassed ? 'var(--accent)' : 'inherit';
   }
 
   // LOGIKA POWIADOMIEŃ SYSTEMOWYCH (przy przejściu "nieosiągnięte" → "osiągnięte"):
@@ -337,7 +338,33 @@ function renderBalance() {
   if (!balanceEl || !currentStats) return;
   const balance = currentBalanceSeconds();
   balanceEl.textContent = formatSeconds(balance, true);
-  balanceEl.style.color = balance >= 0 ? '#a6e3a1' : '#f38ba8';
+  balanceEl.style.color = balance >= 0 ? 'var(--positive)' : 'var(--negative)';
+}
+
+// Nagłówek ekranu Dziś: dzień tygodnia + data ("Poniedziałek" / "9 listopada 2026")
+const WEEKDAYS_LONG = ['Niedziela', 'Poniedziałek', 'Wtorek', 'Środa', 'Czwartek', 'Piątek', 'Sobota'];
+const WEEKDAYS_SHORT = ['nd', 'pn', 'wt', 'śr', 'czw', 'pt', 'sob'];
+const MONTHS_GENITIVE = ['stycznia', 'lutego', 'marca', 'kwietnia', 'maja', 'czerwca',
+  'lipca', 'sierpnia', 'września', 'października', 'listopada', 'grudnia'];
+
+function renderTodayHeader() {
+  const now = new Date();
+  const weekdayEl = document.getElementById('today-weekday');
+  const dateEl = document.getElementById('today-date');
+  if (weekdayEl) weekdayEl.textContent = WEEKDAYS_LONG[now.getDay()];
+  if (dateEl) dateEl.textContent = `${now.getDate()} ${MONTHS_GENITIVE[now.getMonth()]} ${now.getFullYear()}`;
+}
+
+// "YYYY-MM-DD" → "30.10" + skrót dnia tygodnia ("pt")
+function formatDayLabel(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const wd = WEEKDAYS_SHORT[new Date(y, m - 1, d).getDay()];
+  return `<b>${String(d).padStart(2, '0')}.${String(m).padStart(2, '0')}</b> <span class="muted">${wd}</span>`;
+}
+
+// "YYYY-MM-DD HH:MM:SS" → "HH:MM:SS"
+function timePart(ts) {
+  return ts ? (ts.split(' ')[1] || ts) : '';
 }
 
 // Lokalna data w formacie YYYY-MM-DD (bez przesunięcia UTC)
@@ -366,6 +393,7 @@ setInterval(() => {
     }
 
     lastSeenDate = nowDate;
+    renderTodayHeader();
     if (currentUser) updateUI();
   }
 
@@ -382,7 +410,7 @@ async function closeForgottenSessions() {
     const closedDates = await invoke('close_forgotten_sessions', { userId: currentUser.id });
     if (closedDates && closedDates.length > 0) {
       const msg = `Zapomniano zamknąć sesję (${closedDates.join(', ')}). ` +
-        `Zamknięto ją automatycznie o 22:00 – popraw godzinę wyjścia w zakładce Raporty.`;
+        `Zamknięto ją automatycznie o 22:00 – popraw godzinę wyjścia w zakładce Miesiąc.`;
       statusMsg.textContent = msg;
       alert(msg);
     }
@@ -397,6 +425,7 @@ async function updateUI() {
   const activeUserId = viewedUserId(); // tylko dla Raportów
 
   await closeForgottenSessions();
+  renderTodayHeader();
 
   try {
     // Dashboard ZAWSZE liczy bieżący miesiąc i ZAWSZE zalogowanego użytkownika
@@ -432,17 +461,22 @@ async function updateUI() {
       month: Number(selectedMonth) // <-- rzutujemy na Number!
     });
     
-    tableBody.innerHTML = logs.map(log => `
+    tableBody.innerHTML = logs.length === 0
+      ? `<tr><td colspan="6" class="muted" style="text-align: center;">Brak wpisów w tym miesiącu.</td></tr>`
+      : logs.map(log => `
       <tr class="row-${log.event_type}">
-        <td>${log.id}</td>
-        <td>${log.date}</td>
-        <td>${log.time_in.split(' ')[1] || log.time_in}</td>
-        <td>${log.time_out ? (log.time_out.split(' ')[1] || log.time_out) : 'W trakcie...'}</td>
-        <td>${log.duration_seconds !== null ? formatSeconds(log.duration_seconds, false) : '---'}</td>
-        <td><b>${eventLabels[log.event_type] || log.event_type}</b></td>
-        <td>
-          <button onclick="openEditModal(${log.id}, '${log.date}', '${log.time_in}', '${log.time_out || ''}', '${log.event_type}')" style="padding: 2px 6px; background: #89b4fa; color: #11111b;">Edytuj</button>
-          <button onclick="deleteLogEntry(${log.id})" style="padding: 2px 6px; background: #f38ba8; color: #11111b;">Usuń</button>
+        <td>${formatDayLabel(log.date)}</td>
+        <td class="num">${timePart(log.time_in)}</td>
+        <td class="num">${log.time_out ? timePart(log.time_out) : '<span class="chip chip-open">trwa</span>'}</td>
+        <td class="num"><b>${log.duration_seconds !== null ? formatSeconds(log.duration_seconds, false) : '—'}</b></td>
+        <td><span class="chip chip-${log.event_type}">${eventLabels[log.event_type] || log.event_type}</span></td>
+        <td class="actions">
+          <button class="icon-btn icon-btn-plain" title="Edytuj wpis" aria-label="Edytuj wpis" onclick="openEditModal(${log.id}, '${log.date}', '${log.time_in}', '${log.time_out || ''}', '${log.event_type}')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>
+          </button>
+          <button class="icon-btn icon-btn-plain icon-btn-danger" title="Usuń wpis" aria-label="Usuń wpis" onclick="deleteLogEntry(${log.id})">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path></svg>
+          </button>
         </td>
       </tr>
     `).join('');
@@ -453,28 +487,30 @@ async function updateUI() {
     // Stan przycisków = dzisiejsza otwarta sesja (niezależnie od filtra w Raportach)
     const activeLog = await invoke('get_active_session', { userId: currentUser.id });
 
+    // Niedostępne (disabled) przyciski są ukrywane przez CSS (.act:disabled),
+    // więc widać tylko akcje, które mają sens w danej chwili.
     if (!activeLog) {
       btnStart.disabled = false;
       btnStop.disabled = true;
       btnPrivate.disabled = true;
       btnBusiness.disabled = true;
-      btnPrivate.style.display = 'inline-block';
-      btnBusiness.style.display = 'inline-block';
+      btnPrivate.style.display = 'inline-flex';
+      btnBusiness.style.display = 'inline-flex';
       btnReturn.style.display = 'none';
     } else if (activeLog.event_type === 'work') {
       btnStart.disabled = true;
       btnStop.disabled = false;
       btnPrivate.disabled = false;
       btnBusiness.disabled = false;
-      btnPrivate.style.display = 'inline-block';
-      btnBusiness.style.display = 'inline-block';
+      btnPrivate.style.display = 'inline-flex';
+      btnBusiness.style.display = 'inline-flex';
       btnReturn.style.display = 'none';
     } else {
       btnStart.disabled = true;
       btnStop.disabled = true;
       btnPrivate.style.display = 'none';
       btnBusiness.style.display = 'none';
-      btnReturn.style.display = 'inline-block';
+      btnReturn.style.display = 'inline-flex';
     }
   } catch (err) {
     console.error("Błąd UI:", err);
@@ -486,13 +522,16 @@ async function loadAbsences() {
   try {
     const list = await invoke('get_absences', { userId: currentUser.id });
     if (absencesTableBody) {
-      absencesTableBody.innerHTML = list.map(item => `
+      absencesTableBody.innerHTML = list.length === 0
+        ? `<tr><td colspan="3" class="muted" style="text-align: center;">Brak zarejestrowanych nieobecności.</td></tr>`
+        : list.map(item => `
         <tr>
-          <td>${item.id}</td>
-          <td>${item.date}</td>
-          <td><b>${absenceLabels[item.absence_type] || item.absence_type}</b></td>
-          <td>
-            <button onclick="deleteAbsenceEntry(${item.id})" style="padding: 2px 6px; background: #f38ba8; color: #11111b; border: none; border-radius: 3px; cursor: pointer;">Usuń</button>
+          <td>${formatDayLabel(item.date)} <span class="muted">${item.date.slice(0, 4)}</span></td>
+          <td><span class="chip chip-${item.absence_type}">${absenceLabels[item.absence_type] || item.absence_type}</span></td>
+          <td class="actions">
+            <button class="icon-btn icon-btn-plain icon-btn-danger" title="Usuń nieobecność" aria-label="Usuń nieobecność" onclick="deleteAbsenceEntry(${item.id})">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path></svg>
+            </button>
           </td>
         </tr>
       `).join('');
@@ -515,13 +554,13 @@ if (formAddAbsence) {
         absenceType: absenceType.value
       });
       if (absenceMsg) {
-        absenceMsg.style.color = "#a6e3a1";
+        absenceMsg.style.color = "var(--accent)";
         absenceMsg.textContent = res;
       }
       await loadAbsences();
     } catch (err) {
       if (absenceMsg) {
-        absenceMsg.style.color = "#f38ba8";
+        absenceMsg.style.color = "var(--negative)";
         absenceMsg.textContent = "Błąd: " + err;
       }
     }
@@ -560,6 +599,24 @@ selectYear.addEventListener('change', (e) => {
   updateUI();
 });
 
+// Strzałki poprzedni / następny miesiąc (zakres lat jak w liście: 2024–2030)
+function shiftMonth(delta) {
+  let m = selectedMonth + delta;
+  let y = selectedYear;
+  if (m < 1) { m = 12; y -= 1; }
+  if (m > 12) { m = 1; y += 1; }
+  if (y < 2024 || y > 2030) return;
+  selectedMonth = m;
+  selectedYear = y;
+  initDateSelectors();
+  updateUI();
+}
+
+const btnMonthPrev = document.getElementById('btn-month-prev');
+const btnMonthNext = document.getElementById('btn-month-next');
+if (btnMonthPrev) btnMonthPrev.addEventListener('click', () => shiftMonth(-1));
+if (btnMonthNext) btnMonthNext.addEventListener('click', () => shiftMonth(1));
+
 // Funkcja renderująca wykres słupkowy w CSS/HTML
 function renderChart(logs) {
   if (!chartContainer) return;
@@ -575,7 +632,7 @@ function renderChart(logs) {
 
   const dates = Object.keys(dailySeconds).sort();
   if (dates.length === 0) {
-    chartContainer.innerHTML = '<p style="color: var(--text-dim); margin: auto;">Brak danych do wyświetlenia wykresu dla tego miesiąca.</p>';
+    chartContainer.innerHTML = '<p class="chart-empty">Brak danych do wyświetlenia wykresu dla tego miesiąca.</p>';
     return;
   }
 
@@ -595,10 +652,11 @@ function renderChart(logs) {
     barWrapper.style.minWidth = '24px';
     barWrapper.title = `${date}: ${formatSeconds(totalSec, false)}`;
 
+    // Etap 1 redesignu: tylko nowe kolory; schemat 4 stanów (saldo narastająco) – etap 3
     barWrapper.innerHTML = `
-      <span style="font-size: 0.7em; color: var(--text-sub); margin-bottom: 4px;">${hours.toFixed(1)}h</span>
-      <div style="width: 100%; max-width: 20px; height: ${heightPx}px; background: ${hours >= 8 ? 'var(--accent-green)' : 'var(--accent-blue)'}; border-radius: 4px 4px 0 0;"></div>
-      <span style="font-size: 0.75em; font-weight: bold; margin-top: 4px;">${dayNum}</span>
+      <span style="font-size: 10px; color: var(--text-muted); margin-bottom: 4px; font-family: var(--mono);">${hours.toFixed(1).replace('.', ',')}</span>
+      <div style="width: 100%; max-width: 22px; height: ${heightPx}px; background: ${hours >= 8 ? 'var(--accent)' : 'var(--accent-soft)'}; border-radius: 4px 4px 1px 1px;"></div>
+      <span style="font-size: 11px; font-weight: 600; margin-top: 4px; font-family: var(--mono);">${dayNum}</span>
     `;
 
     chartContainer.appendChild(barWrapper);
@@ -640,19 +698,19 @@ formCreateUser.addEventListener('submit', async (e) => {
       password: newPassword.value,
       role: newRole.value
     });
-    createUserMsg.style.color = "#a6e3a1";
+    createUserMsg.style.color = "var(--accent)";
     createUserMsg.textContent = msg;
     newUsername.value = "";
     newPassword.value = "";
   } catch (err) {
-    createUserMsg.style.color = "#f38ba8";
+    createUserMsg.style.color = "var(--negative)";
     createUserMsg.textContent = err;
   }
 });
 
 // Modale i Formularze
 window.openEditModal = (id, date, timeIn, timeOut, eventType) => {
-  dialogTitle.textContent = "Edycja Wpisu #" + id;
+  dialogTitle.textContent = "Edytuj wpis";
   editId.value = id;
   editDate.value = date;
   editTimeIn.value = timeIn.split(' ')[1] || timeIn;
@@ -671,7 +729,7 @@ window.deleteLogEntry = async (id) => {
 };
 
 btnAddManual.addEventListener('click', () => {
-  dialogTitle.textContent = "Dodaj Zapomniany Wpis";
+  dialogTitle.textContent = "Nowy wpis";
   editId.value = "";
   editDate.value = localDateString(); // lokalna data (toISOString daje UTC → po północy "wczoraj")
   editTimeIn.value = "08:00:00";
@@ -681,6 +739,8 @@ btnAddManual.addEventListener('click', () => {
 });
 
 btnDialogCancel.addEventListener('click', () => editDialog.close());
+const btnDialogClose = document.getElementById('btn-dialog-close');
+if (btnDialogClose) btnDialogClose.addEventListener('click', () => editDialog.close());
 
 editForm.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -761,10 +821,10 @@ document.getElementById('btn-export-csv').addEventListener('click', async () => 
     link.click();
     document.body.removeChild(link);
 
-    csvMsg.style.color = "#a6e3a1";
+    csvMsg.style.color = "var(--accent)";
     csvMsg.textContent = "Wygenerowano plik CSV!";
   } catch (err) {
-    csvMsg.style.color = "#f38ba8";
+    csvMsg.style.color = "var(--negative)";
     csvMsg.textContent = "Błąd eksportu: " + err;
   }
 });
@@ -792,11 +852,11 @@ document.getElementById('input-import-csv').addEventListener('change', (e) => {
         csvContent: content
       });
       // Zielony = wszystko OK, pomarańczowy = część wierszy odrzucona
-      csvMsg.style.color = res.includes("Błędne wiersze") ? "#fab387" : "#a6e3a1";
+      csvMsg.style.color = res.includes("Błędne wiersze") ? "var(--private)" : "var(--accent)";
       csvMsg.textContent = res;
       await updateUI();
     } catch (err) {
-      csvMsg.style.color = "#f38ba8";
+      csvMsg.style.color = "var(--negative)";
       csvMsg.textContent = "Błąd importu: " + err;
     }
   };
@@ -853,34 +913,26 @@ async function sendSystemNotification(title, body) {
 }
 
 /**
- * Konwertuje sekundy na format tekstowy "Xh Ym Zs" z dokładnością do sekund
+ * Konwertuje sekundy na format zegarowy "G:MM:SS" (redesign: zamiast "Xh Ym Zs")
  * @param {number} totalSeconds - Liczba sekund
  * @param {boolean} showPlus - Czy pokazywać znak '+' przy dodatnich wartościach (dla salda)
  */
 function formatSeconds(totalSeconds, showPlus = false) {
   if (totalSeconds === null || totalSeconds === undefined || isNaN(totalSeconds)) {
-    return '0s';
+    return '0:00:00';
   }
 
   const isNegative = totalSeconds < 0;
-  const absSeconds = Math.abs(totalSeconds);
+  const absSeconds = Math.abs(Math.round(totalSeconds));
 
   const hours = Math.floor(absSeconds / 3600);
   const minutes = Math.floor((absSeconds % 3600) / 60);
   const seconds = absSeconds % 60;
 
-  let result = "";
-
-  if (hours > 0) {
-    result = `${hours}h ${minutes}m ${seconds}s`;
-  } else if (minutes > 0) {
-    result = `${minutes}m ${seconds}s`;
-  } else {
-    result = `${seconds}s`;
-  }
+  const result = `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 
   if (isNegative) {
-    return `-${result}`;
+    return `−${result}`; // typograficzny minus
   } else if (showPlus && totalSeconds > 0) {
     return `+${result}`;
   }
@@ -930,4 +982,4 @@ function startLiveTimer() {
   }, 1000); // 1000ms = 1 sekunda
 }
 // Start
-initApp();
+initApp();
