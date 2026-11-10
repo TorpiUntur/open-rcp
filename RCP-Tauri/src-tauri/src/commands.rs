@@ -1,6 +1,7 @@
 use crate::AppState;
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
+use tauri::Manager; // app.path() – folder danych aplikacji (kopie zapasowe)
 
 #[derive(Serialize)]
 pub struct User {
@@ -743,6 +744,105 @@ pub fn set_vacation_settings(
         "Zapisano: limit {} dni rocznie, zaległy urlop na {}: {} dni",
         days_per_year, year, carryover_days
     ))
+}
+
+// ==========================================
+// Kopia zapasowa bazy (redesign etap 5b)
+// Kopie trafiają do <folder danych aplikacji>\backups\data_RRRR-MM-DD_GGMMSS.db
+// (%APPDATA%\com.rcp.timetracker\backups). `VACUUM INTO` daje spójną kopię
+// także przy otwartym połączeniu (zwykłe kopiowanie pliku mogłoby złapać zapis w połowie).
+// ==========================================
+#[derive(Serialize)]
+pub struct BackupInfo {
+    pub file_name: String,
+    pub path: String,
+    pub size_bytes: u64,
+    pub modified: String, // "RRRR-MM-DD GG:MM" (czas lokalny)
+}
+
+fn backups_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Brak folderu danych aplikacji: {}", e))?
+        .join("backups");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Nie można utworzyć folderu kopii: {}", e))?;
+    Ok(dir)
+}
+
+fn backup_info(path: &std::path::Path) -> Option<BackupInfo> {
+    let meta = std::fs::metadata(path).ok()?;
+    let modified = meta
+        .modified()
+        .ok()
+        .map(|t| {
+            let dt: chrono::DateTime<chrono::Local> = t.into();
+            dt.format("%Y-%m-%d %H:%M").to_string()
+        })
+        .unwrap_or_default();
+    Some(BackupInfo {
+        file_name: path.file_name()?.to_string_lossy().to_string(),
+        path: path.to_string_lossy().to_string(),
+        size_bytes: meta.len(),
+        modified,
+    })
+}
+
+#[tauri::command]
+pub fn backup_database(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<BackupInfo, String> {
+    let dir = backups_dir(&app)?;
+    let stamp = chrono::Local::now().format("%Y-%m-%d_%H%M%S").to_string();
+    let target = dir.join(format!("data_{}.db", stamp));
+    if target.exists() {
+        return Err("Kopia o tej nazwie już istnieje – spróbuj ponownie za sekundę".into());
+    }
+    let target_str: String = target.to_string_lossy().to_string();
+
+    {
+        let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+        db.execute("VACUUM INTO ?1", [&target_str])
+            .map_err(|e| format!("Błąd tworzenia kopii: {}", e))?;
+    }
+
+    backup_info(&target).ok_or_else(|| "Kopia utworzona, ale nie można odczytać pliku".to_string())
+}
+
+#[tauri::command]
+pub fn list_backups(app: tauri::AppHandle) -> Result<Vec<BackupInfo>, String> {
+    let dir = backups_dir(&app)?;
+    let entries = std::fs::read_dir(&dir).map_err(|e| format!("Błąd odczytu folderu kopii: {}", e))?;
+    let mut list: Vec<BackupInfo> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("db"))
+        .filter_map(|p| backup_info(&p))
+        .collect();
+    // Nazwy zawierają datę i godzinę → sortowanie po nazwie = od najnowszej
+    list.sort_by(|a, b| b.file_name.cmp(&a.file_name));
+    Ok(list)
+}
+
+#[tauri::command]
+pub fn open_backups_folder(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = backups_dir(&app)?;
+    open_in_file_manager(&dir)
+}
+
+#[cfg(target_os = "windows")]
+fn open_in_file_manager(dir: &std::path::Path) -> Result<(), String> {
+    std::process::Command::new("explorer")
+        .arg(dir)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Nie można otworzyć folderu: {}", e))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn open_in_file_manager(_dir: &std::path::Path) -> Result<(), String> {
+    Err("Otwieranie folderu jest obsługiwane tylko w Windows".into())
 }
 
 /// Historia normy dziennej: (obowiązuje_od, sekundy), rosnąco po dacie.

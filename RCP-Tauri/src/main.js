@@ -1635,8 +1635,57 @@ if (formVacation) {
   });
 }
 
+// Ustawienia → Dane: kopia zapasowa bazy (etap 5b)
+const btnBackup = document.getElementById('btn-backup');
+const btnOpenBackups = document.getElementById('btn-open-backups');
+const backupMsg = document.getElementById('backup-msg');
+
+function formatBytes(n) {
+  if (n >= 1048576) return (n / 1048576).toFixed(1).replace('.', ',') + ' MB';
+  return Math.max(1, Math.round(n / 1024)) + ' kB';
+}
+
+async function loadBackupInfo() {
+  try {
+    const list = await invoke('list_backups');
+    if (!list || list.length === 0) {
+      setText('backup-info', 'Brak kopii. Kopie trafiają do %APPDATA%\\com.rcp.timetracker\\backups.');
+    } else {
+      const last = list[0];
+      const n = list.length;
+      const word = n === 1 ? 'kopia' : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) ? 'kopie' : 'kopii';
+      setText('backup-info', `Ostatnia: ${last.modified} · ${formatBytes(last.size_bytes)} · w folderze: ${n} ${word}`);
+    }
+  } catch (err) {
+    setText('backup-info', 'Nie udało się odczytać listy kopii: ' + err);
+  }
+}
+
+if (btnBackup) btnBackup.addEventListener('click', async () => {
+  if (backupMsg) backupMsg.textContent = '';
+  btnBackup.disabled = true;
+  try {
+    const info = await invoke('backup_database');
+    if (backupMsg) { backupMsg.style.color = 'var(--accent)'; backupMsg.textContent = `Utworzono kopię ${info.file_name} (${formatBytes(info.size_bytes)})`; }
+    await loadBackupInfo();
+  } catch (err) {
+    if (backupMsg) { backupMsg.style.color = 'var(--negative)'; backupMsg.textContent = 'Błąd: ' + err; }
+  } finally {
+    btnBackup.disabled = false;
+  }
+});
+
+if (btnOpenBackups) btnOpenBackups.addEventListener('click', async () => {
+  try {
+    await invoke('open_backups_folder');
+  } catch (err) {
+    if (backupMsg) { backupMsg.style.color = 'var(--negative)'; backupMsg.textContent = 'Błąd: ' + err; }
+  }
+});
+
 async function loadSettings() {
   loadVacationForm();
+  loadBackupInfo();
   if (currentUser) {
     setText('settings-username', currentUser.username);
     setText('settings-role', currentUser.role === 'admin' ? 'Rola: administrator' : 'Rola: użytkownik');

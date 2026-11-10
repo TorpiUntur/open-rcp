@@ -360,6 +360,18 @@
             <h2 id="s-dane" class="section-title">Dane</h2>
             <div class="setting-row">
               <div class="setting-text">
+                <div class="setting-name">Kopia zapasowa bazy</div>
+                <div class="setting-hint" id="backup-info">Kopie trafiają do folderu backups obok bazy.</div>
+                <div class="setting-hint">Przywracanie: zamknij aplikację i podmień plik data.db na wybraną kopię (zmieniając jej nazwę na data.db).</div>
+                <p id="backup-msg" class="inline-msg" style="margin: 6px 0 0;"></p>
+              </div>
+              <div class="toolbar">
+                <button type="button" id="btn-open-backups" class="btn btn-ghost">Otwórz folder</button>
+                <button type="button" id="btn-backup" class="btn btn-light">Zrób kopię</button>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-text">
                 <div class="setting-name">Baza danych</div>
                 <div class="setting-hint mono">%APPDATA%\com.rcp.timetracker\data.db</div>
               </div>
