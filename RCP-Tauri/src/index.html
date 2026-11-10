@@ -272,7 +272,7 @@
             <form id="form-settings-target" class="setting-row">
               <div class="setting-text">
                 <div class="setting-name">Dzienna norma</div>
-                <div class="setting-hint">Nie działa wstecz – nowa norma obowiązuje od dziś</div>
+                <div class="setting-hint">Nie działa wstecz – nowa norma obowiązuje od dziś. Weekendy i święta mają normę 0.</div>
                 <p id="target-msg" class="inline-msg" style="margin: 6px 0 0;"></p>
               </div>
               <div class="time-inputs">
@@ -282,6 +282,24 @@
               </div>
               <button type="submit" class="btn btn-light">Zapisz</button>
             </form>
+            <div class="setting-row">
+              <div class="setting-text">
+                <div class="setting-name">Zapomniana sesja</div>
+                <div class="setting-hint">Sesja otwarta z poprzedniego dnia jest zamykana o 22:00 tamtego dnia, a przy starcie pojawia się komunikat.</div>
+              </div>
+              <span class="badge">22:00</span>
+            </div>
+          </section>
+
+          <section class="settings-section" aria-labelledby="s-konto">
+            <h2 id="s-konto" class="section-title">Konto</h2>
+            <div class="setting-row">
+              <div class="setting-text">
+                <div class="setting-name" id="settings-username"></div>
+                <div class="setting-hint" id="settings-role"></div>
+              </div>
+              <button type="button" id="btn-logout-settings" class="btn btn-ghost" style="color: var(--negative); border-color: rgba(248, 113, 113, 0.4);">Wyloguj</button>
+            </div>
           </section>
 
           <!-- Panel Admina: Tworzenie kont (Widoczny tylko dla roli 'admin') -->
@@ -307,27 +325,76 @@
               <p id="create-user-msg" class="inline-msg" style="flex-basis: 100%; margin: 0;"></p>
             </form>
           </section>
+
+          <section class="settings-section" aria-labelledby="s-dane">
+            <h2 id="s-dane" class="section-title">Dane</h2>
+            <div class="setting-row">
+              <div class="setting-text">
+                <div class="setting-name">Baza danych</div>
+                <div class="setting-hint mono">%APPDATA%\com.rcp.timetracker\data.db</div>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-text">
+                <div class="setting-name">Log startu</div>
+                <div class="setting-hint mono">%LOCALAPPDATA%\com.rcp.timetracker\logs\rcp.log</div>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-text">
+                <div class="setting-name">Import i eksport CSV</div>
+                <div class="setting-hint">Ikony w zakładce Miesiąc (eksport obejmuje wszystkie wpisy wybranego użytkownika).</div>
+              </div>
+            </div>
+          </section>
         </section>
 
-        <!-- WIDOK 4: URLOPY I L4 -->
+        <!-- WIDOK 4: URLOPY I NIEOBECNOŚCI -->
         <section id="view-absences" style="display: none;">
           <div class="page-head">
             <h1>Urlopy i nieobecności</h1>
+            <div class="year-switch">
+              <button type="button" id="btn-abs-year-prev" class="icon-btn icon-btn-plain" aria-label="Poprzedni rok">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
+              </button>
+              <span id="abs-year" class="mono">2026</span>
+              <button type="button" id="btn-abs-year-next" class="icon-btn icon-btn-plain" aria-label="Następny rok">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg>
+              </button>
+            </div>
           </div>
 
+          <!-- Liczniki roku (renderAbsSummary) -->
+          <section id="abs-summary" class="stat-strip stat-strip-sm" aria-label="Podsumowanie nieobecności"></section>
+
           <div class="split">
-            <!-- Formularz dodawania urlopu -->
+            <!-- Widok roczny: 12 mini-kalendarzy (renderAbsYear) -->
+            <section class="panel split-main" aria-label="Rok – kalendarz nieobecności">
+              <div id="abs-year-grid" class="year-grid"></div>
+              <div class="cal-legend" aria-hidden="true">
+                <span class="legend-item"><span class="swatch" style="background: var(--vacation);"></span>urlop</span>
+                <span class="legend-item"><span class="swatch" style="background: var(--sick);"></span>L4</span>
+                <span class="legend-item"><span class="swatch" style="background: var(--text-muted);"></span>inne</span>
+                <span class="legend-item"><span class="swatch" style="background: repeating-linear-gradient(135deg, #4a5361 0 2px, #1e242c 2px 4px);"></span>święto</span>
+                <span class="legend-item"><span class="swatch" style="background: #121418; border: 1px solid var(--border);"></span>weekend</span>
+              </div>
+              <p class="setting-hint" style="margin-top: 8px;">Kliknij dzień, aby zacząć zakres – drugie kliknięcie go kończy.</p>
+            </section>
+
+            <!-- Formularz dodawania -->
             <section class="panel split-side" aria-labelledby="h-absence-new">
               <h2 id="h-absence-new" class="panel-title">Nowa nieobecność</h2>
               <form id="form-add-absence" class="form-stack">
-                <div class="field">
-                  <label for="absence-type">Typ</label>
-                  <select id="absence-type">
-                    <option value="vacation">Urlop wypoczynkowy</option>
-                    <option value="sick_leave">Zwolnienie lekarskie (L4)</option>
-                    <option value="other">Inna nieobecność</option>
-                  </select>
+                <div class="segmented seg-fill" role="group" aria-label="Typ nieobecności" id="absence-type-group">
+                  <button type="button" data-type="vacation" aria-pressed="true">Urlop</button>
+                  <button type="button" data-type="sick_leave" aria-pressed="false">L4</button>
+                  <button type="button" data-type="other" aria-pressed="false">Inne</button>
                 </div>
+                <select id="absence-type" hidden>
+                  <option value="vacation">Urlop wypoczynkowy</option>
+                  <option value="sick_leave">Zwolnienie lekarskie (L4)</option>
+                  <option value="other">Inna nieobecność</option>
+                </select>
                 <div class="field-row">
                   <div class="field">
                     <label for="absence-start">Od</label>
@@ -338,27 +405,18 @@
                     <input type="date" id="absence-end" required />
                   </div>
                 </div>
+                <div id="absence-preview" class="preview-box" aria-live="polite"></div>
                 <button type="submit" class="btn btn-light btn-block">Zapisz nieobecność</button>
                 <p id="absence-msg" class="inline-msg" style="margin: 0;"></p>
               </form>
             </section>
-
-            <!-- Tabela zarejestrowanych absencji -->
-            <section class="panel panel-flush split-main" aria-label="Zarejestrowane nieobecności">
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Data</th>
-                      <th>Typ</th>
-                      <th><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);">Akcje</span></th>
-                    </tr>
-                  </thead>
-                  <tbody id="absences-table-body"></tbody>
-                </table>
-              </div>
-            </section>
           </div>
+
+          <!-- Lista zakresów (renderAbsRanges) -->
+          <section class="panel panel-flush" aria-labelledby="h-abs-list">
+            <h2 id="h-abs-list" class="panel-title" style="padding: 16px 20px 0;">Zarejestrowane w <span id="abs-list-year"></span></h2>
+            <div id="abs-ranges" class="range-list"></div>
+          </section>
         </section>
       </main>
     </div>
@@ -368,7 +426,9 @@
   <dialog id="edit-dialog" aria-labelledby="dialog-title">
     <form id="edit-form" method="dialog" class="form-stack">
       <div class="dialog-head" style="margin-bottom: 0;">
-        <h2 id="dialog-title">Edytuj wpis</h2>
+        <div>
+          <h2 id="dialog-title">Edytuj wpis</h2>
+        </div>
         <button type="button" id="btn-dialog-close" class="icon-btn icon-btn-plain" aria-label="Zamknij">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"></path></svg>
         </button>
@@ -376,8 +436,13 @@
       <input type="hidden" id="edit-id" />
 
       <div class="field">
-        <label for="edit-event-type">Typ</label>
-        <select id="edit-event-type">
+        <span class="field-label" id="lbl-edit-type">Typ</span>
+        <div class="type-seg" role="group" aria-labelledby="lbl-edit-type" id="edit-type-group">
+          <button type="button" data-type="work" aria-pressed="true"><span class="dot" style="background: var(--accent);"></span>Praca</button>
+          <button type="button" data-type="break_private" aria-pressed="false"><span class="dot dot-private"></span>Prywatne</button>
+          <button type="button" data-type="business" aria-pressed="false"><span class="dot dot-business"></span>Służbowe</button>
+        </div>
+        <select id="edit-event-type" hidden>
           <option value="work">Praca przy biurku</option>
           <option value="break_private">Wyjście prywatne</option>
           <option value="business">Wyjście służbowe</option>
@@ -392,16 +457,21 @@
       <div class="field-row">
         <div class="field">
           <label for="edit-time-in">Start</label>
-          <input type="text" id="edit-time-in" class="time-big" required placeholder="08:00" />
+          <input type="text" id="edit-time-in" class="time-big" required placeholder="08:00" autocomplete="off" />
         </div>
         <div class="field">
           <label for="edit-time-out">Stop</label>
-          <input type="text" id="edit-time-out" class="time-big" placeholder="puste = trwa" />
+          <input type="text" id="edit-time-out" class="time-big" placeholder="puste = trwa" autocomplete="off" />
         </div>
       </div>
-      <p class="setting-hint">Format GG:MM lub GG:MM:SS. Puste „Stop” = wpis w trakcie.</p>
+
+      <div class="preview-box duration-box">
+        <span class="muted">Czas trwania · format GG:MM lub GG:MM:SS</span>
+        <b id="edit-duration" class="mono">—</b>
+      </div>
 
       <div class="dialog-actions">
+        <button type="button" id="btn-dialog-delete" class="btn btn-danger-text">Usuń</button>
         <span class="spacer"></span>
         <button type="button" id="btn-dialog-cancel" class="btn btn-ghost">Anuluj</button>
         <button type="submit" class="btn btn-light">Zapisz</button>

@@ -790,30 +790,279 @@ async function updateUI() {
     console.error("Błąd UI:", err);
   }
 }
-// 6. Obsługa Urlopów i Nieobecności
+// 6. Obsługa Urlopów i Nieobecności (redesign etap 4: widok roczny + zakresy)
+let absenceList = [];                   // wszystkie nieobecności zalogowanego użytkownika
+let absYear = new Date().getFullYear(); // rok w widoku Urlopy
+let absPickStart = null;                // pierwszy klik w kalendarzu rocznym (czeka na drugi)
+
+const MONTHS_SHORT = ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'];
+
 async function loadAbsences() {
   if (!currentUser) return;
   try {
-    const list = await invoke('get_absences', { userId: currentUser.id });
-    if (absencesTableBody) {
-      absencesTableBody.innerHTML = list.length === 0
-        ? `<tr><td colspan="3" class="muted" style="text-align: center;">Brak zarejestrowanych nieobecności.</td></tr>`
-        : list.map(item => `
-        <tr>
-          <td>${formatDayLabel(item.date)} <span class="muted">${item.date.slice(0, 4)}</span></td>
-          <td><span class="chip chip-${item.absence_type}">${absenceLabels[item.absence_type] || item.absence_type}</span></td>
-          <td class="actions">
-            <button class="icon-btn icon-btn-plain icon-btn-danger" title="Usuń nieobecność" aria-label="Usuń nieobecność" onclick="deleteAbsenceEntry(${item.id})">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path></svg>
-            </button>
-          </td>
-        </tr>
-      `).join('');
-    }
+    absenceList = (await invoke('get_absences', { userId: currentUser.id })) || [];
   } catch (err) {
     console.error("Błąd ładowania absencji:", err);
+    absenceList = [];
+  }
+  renderAbsences();
+}
+
+function renderAbsences() {
+  setText('abs-year', String(absYear));
+  setText('abs-list-year', String(absYear));
+  renderAbsSummary();
+  renderAbsYear();
+  renderAbsRanges();
+  updateAbsencePreview();
+}
+
+// "YYYY-MM-DD" → Date (lokalnie) i z powrotem
+function dateFromStr(s) {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function addDays(dateStr, n) {
+  const d = dateFromStr(dateStr);
+  d.setDate(d.getDate() + n);
+  return localDateString(d);
+}
+
+// Liczniki roku: tylko dni robocze (stare wpisy w weekend/święto nie liczą się)
+function renderAbsSummary() {
+  const el = document.getElementById('abs-summary');
+  if (!el) return;
+  const today = localDateString();
+  const counts = { vacation: 0, sick_leave: 0, other: 0 };
+  let vacPlanned = 0;
+  absenceList.forEach(a => {
+    if (!a.date.startsWith(absYear + '-') || isNonWorkingDay(a.date)) return;
+    counts[a.absence_type] = (counts[a.absence_type] || 0) + 1;
+    if (a.absence_type === 'vacation' && a.date > today) vacPlanned++;
+  });
+  const vacUsed = counts.vacation - vacPlanned;
+  const dni = (n) => (n === 1 ? 'dzień' : 'dni');
+  el.innerHTML = `
+    <div class="stat"><span class="stat-label">Urlop wypoczynkowy</span><span class="stat-value" style="color: #c4b5fd;">${counts.vacation} <small>${dni(counts.vacation)}</small></span><span class="stat-sub">wykorzystane: ${vacUsed} · zaplanowane: ${vacPlanned}</span></div>
+    <div class="stat"><span class="stat-label">L4</span><span class="stat-value" style="color: ${counts.sick_leave ? '#f9a8d4' : 'inherit'};">${counts.sick_leave} <small>${dni(counts.sick_leave)}</small></span><span class="stat-sub">dni robocze</span></div>
+    <div class="stat"><span class="stat-label">Inne</span><span class="stat-value">${counts.other} <small>${dni(counts.other)}</small></span><span class="stat-sub">dni robocze</span></div>`;
+}
+
+function renderAbsYear() {
+  const el = document.getElementById('abs-year-grid');
+  if (!el) return;
+  const today = localDateString();
+  const byDate = {};
+  absenceList.forEach(a => { byDate[a.date] = a.absence_type; });
+  const selFrom = absenceStart && absenceStart.value ? absenceStart.value : null;
+  const selTo = absenceEnd && absenceEnd.value ? absenceEnd.value : selFrom;
+
+  const months = [];
+  for (let m = 1; m <= 12; m++) {
+    const first = new Date(absYear, m - 1, 1);
+    const lead = (first.getDay() + 6) % 7;
+    const daysIn = new Date(absYear, m, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < lead; i++) cells.push('<span class="yd blank" aria-hidden="true"></span>');
+    let count = 0;
+    for (let d = 1; d <= daysIn; d++) {
+      const date = `${absYear}-${pad2(m)}-${pad2(d)}`;
+      const wd = (lead + d - 1) % 7; // 0 = pn … 6 = nd
+      const holiday = isPolishHoliday(date);
+      const weekend = wd >= 5;
+      const type = byDate[date];
+      const cls = ['yd'];
+      if (type) {
+        cls.push(type);
+        if (weekend || holiday) cls.push('extra'); else count++;
+      } else if (holiday) cls.push('holiday');
+      else if (weekend) cls.push('weekend');
+      else if (date < today) cls.push('past');
+      if (date === today) cls.push('today');
+      if (selFrom && date >= selFrom && date <= (selTo || selFrom)) cls.push('sel');
+      const label = `${d} ${MONTHS_GENITIVE[m - 1]}${type ? ', ' + (absenceLabels[type] || type) : holiday ? ', święto' : ''}`;
+      cells.push(`<button type="button" class="${cls.join(' ')}" title="${label}" aria-label="${label}" onclick="rcpAbsPick('${date}')"></button>`);
+    }
+    months.push(`<div>
+      <div class="ym-head"><b>${MONTHS_NOMINATIVE[m - 1].charAt(0).toUpperCase() + MONTHS_NOMINATIVE[m - 1].slice(1)}</b><span>${count ? count + ' d' : ''}</span></div>
+      <div class="ym-grid">${cells.join('')}</div>
+    </div>`);
+  }
+  el.innerHTML = months.join('');
+}
+
+// Wybór zakresu klikami w kalendarzu rocznym: 1. klik = początek (i koniec), 2. klik = koniec
+window.rcpAbsPick = (date) => {
+  if (!absenceStart || !absenceEnd) return;
+  if (!absPickStart) {
+    absPickStart = date;
+    absenceStart.value = date;
+    absenceEnd.value = date;
+  } else {
+    if (date < absPickStart) {
+      absenceStart.value = date;
+      absenceEnd.value = absPickStart;
+    } else {
+      absenceStart.value = absPickStart;
+      absenceEnd.value = date;
+    }
+    absPickStart = null;
+  }
+  renderAbsYear();
+  updateAbsencePreview();
+};
+
+// Podgląd zakresu w formularzu: ile dni roboczych, ile już zapisanych
+function updateAbsencePreview() {
+  const el = document.getElementById('absence-preview');
+  if (!el || !absenceStart || !absenceEnd) return;
+  const from = absenceStart.value;
+  const to = absenceEnd.value || from;
+  if (!from) { el.innerHTML = ''; return; }
+  if (to < from) {
+    el.innerHTML = '<span style="color: var(--negative);">Data „Do” jest wcześniejsza niż „Od”.</span>';
+    return;
+  }
+  const byDate = {};
+  absenceList.forEach(a => { byDate[a.date] = a.absence_type; });
+  let working = 0, skipped = 0, same = 0, other = 0, guard = 0;
+  for (let d = from; d <= to && guard < 400; d = addDays(d, 1), guard++) {
+    if (isNonWorkingDay(d)) { skipped++; continue; }
+    working++;
+    if (byDate[d] === absenceType.value) same++;
+    else if (byDate[d]) other++;
+  }
+  if (guard >= 400) {
+    el.innerHTML = '<span style="color: var(--negative);">Zakres dłuższy niż rok.</span>';
+    return;
+  }
+  const notes = [];
+  if (skipped) notes.push(`pominięte dni wolne: ${skipped}`);
+  if (same) notes.push(`już zapisane: ${same}`);
+  if (other) notes.push(`zmiana typu: ${other}`);
+  el.innerHTML = `<b style="color: #c4b5fd;">${working} ${working === 1 ? 'dzień roboczy' : 'dni roboczych'}</b>
+    <div class="setting-hint">${notes.length ? notes.join(' · ') : 'weekendy i święta są pomijane'}</div>`;
+}
+
+if (absenceStart) absenceStart.addEventListener('change', () => {
+  if (absenceEnd && (!absenceEnd.value || absenceEnd.value < absenceStart.value)) absenceEnd.value = absenceStart.value;
+  absPickStart = null;
+  renderAbsYear();
+  updateAbsencePreview();
+});
+if (absenceEnd) absenceEnd.addEventListener('change', () => { absPickStart = null; renderAbsYear(); updateAbsencePreview(); });
+
+// Typ nieobecności – 3 przyciski sterują ukrytym <select id="absence-type">
+const absenceTypeButtons = document.querySelectorAll('#absence-type-group button');
+function syncAbsenceType() {
+  absenceTypeButtons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.type === absenceType.value)));
+}
+absenceTypeButtons.forEach(b => b.addEventListener('click', () => {
+  absenceType.value = b.dataset.type;
+  syncAbsenceType();
+  updateAbsencePreview();
+}));
+
+// Zakresy: kolejne dni robocze tego samego typu (przerwy tylko na dni wolne) = jeden zakres
+function buildAbsenceRanges() {
+  const list = absenceList.filter(a => a.date.startsWith(absYear + '-')).sort((a, b) => a.date.localeCompare(b.date));
+  const ranges = [];
+  let cur = null;
+  const onlyFreeBetween = (a, b) => {
+    for (let d = addDays(a, 1); d < b; d = addDays(d, 1)) if (!isNonWorkingDay(d)) return false;
+    return true;
+  };
+  list.forEach(a => {
+    if (cur && cur.type === a.absence_type && onlyFreeBetween(cur.last, a.date)) {
+      cur.items.push(a);
+      cur.last = a.date;
+    } else {
+      cur = { type: a.absence_type, items: [a], last: a.date };
+      ranges.push(cur);
+    }
+  });
+  return ranges.map(r => {
+    const work = r.items.filter(a => !isNonWorkingDay(a.date));
+    const extra = r.items.filter(a => isNonWorkingDay(a.date));
+    const shown = work.length ? work : r.items;
+    return { type: r.type, items: r.items, work, extra, from: shown[0].date, to: shown[shown.length - 1].date };
+  }).reverse(); // najnowsze na górze
+}
+
+function formatRange(from, to) {
+  const a = dateFromStr(from), b = dateFromStr(to);
+  if (from === to) return `${a.getDate()} ${MONTHS_GENITIVE[a.getMonth()]}`;
+  if (a.getMonth() === b.getMonth()) return `${a.getDate()}–${b.getDate()} ${MONTHS_GENITIVE[b.getMonth()]}`;
+  return `${a.getDate()} ${MONTHS_GENITIVE[a.getMonth()]} – ${b.getDate()} ${MONTHS_GENITIVE[b.getMonth()]}`;
+}
+
+let absenceRangesCache = [];
+
+function renderAbsRanges() {
+  const el = document.getElementById('abs-ranges');
+  if (!el) return;
+  absenceRangesCache = buildAbsenceRanges();
+  if (absenceRangesCache.length === 0) {
+    el.innerHTML = `<div class="empty-row">Brak nieobecności w ${absYear}.</div>`;
+    return;
+  }
+  const today = localDateString();
+  el.innerHTML = absenceRangesCache.map((r, i) => {
+    const wdFrom = WEEKDAYS_SHORT[dateFromStr(r.from).getDay()];
+    const wdTo = WEEKDAYS_SHORT[dateFromStr(r.to).getDay()];
+    let status = '';
+    if (r.from > today) status = 'zaplanowany';
+    else if (r.from <= today && r.to >= today) status = 'trwa';
+    const extraList = r.extra.map(a => { const d = dateFromStr(a.date); return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`; }).join(', ');
+    const n = r.work.length;
+    return `<div class="range-item">
+      <span class="range-mark ${r.type}"></span>
+      <div class="range-main">
+        <div class="range-title">${formatRange(r.from, r.to)} <span>· ${r.from === r.to ? wdFrom : wdFrom + '–' + wdTo}</span></div>
+        <div class="range-type">${absenceLabels[r.type] || r.type}</div>
+      </div>
+      ${status ? `<span class="badge">${status}</span>` : ''}
+      <span class="range-count">${n} ${n === 1 ? 'dzień' : 'dni'}</span>
+      <button type="button" class="icon-btn icon-btn-plain icon-btn-danger" title="Usuń cały zakres" aria-label="Usuń nieobecność ${formatRange(r.from, r.to)}" onclick="rcpDeleteAbsenceRange(${i})">${ICON_DELETE}</button>
+      ${r.extra.length ? `<div class="range-warn">
+        <span>W bazie są też dni wolne z tego zakresu (${extraList}) – zapisane przed poprawką pomijania weekendów.</span>
+        <button type="button" class="btn btn-sm btn-warn" onclick="rcpDeleteAbsenceExtra(${i})">Usuń zbędne</button>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function deleteAbsenceIds(ids) {
+  for (const id of ids) {
+    await invoke('delete_absence', { absenceId: id });
   }
 }
+
+window.rcpDeleteAbsenceRange = async (i) => {
+  const r = absenceRangesCache[i];
+  if (!r) return;
+  if (!confirm(`Usunąć nieobecność ${formatRange(r.from, r.to)} (${absenceLabels[r.type] || r.type}, wpisów: ${r.items.length})?`)) return;
+  try {
+    await deleteAbsenceIds(r.items.map(a => a.id));
+  } catch (e) { alert(e); }
+  await loadAbsences();
+};
+
+window.rcpDeleteAbsenceExtra = async (i) => {
+  const r = absenceRangesCache[i];
+  if (!r || !r.extra.length) return;
+  if (!confirm(`Usunąć ${r.extra.length} wpis(y) nieobecności w dni wolne?`)) return;
+  try {
+    await deleteAbsenceIds(r.extra.map(a => a.id));
+  } catch (e) { alert(e); }
+  await loadAbsences();
+};
+
+const btnAbsYearPrev = document.getElementById('btn-abs-year-prev');
+const btnAbsYearNext = document.getElementById('btn-abs-year-next');
+if (btnAbsYearPrev) btnAbsYearPrev.addEventListener('click', () => { absYear--; renderAbsences(); });
+if (btnAbsYearNext) btnAbsYearNext.addEventListener('click', () => { absYear++; renderAbsences(); });
 
 if (formAddAbsence) {
   formAddAbsence.addEventListener('submit', async (e) => {
@@ -824,13 +1073,14 @@ if (formAddAbsence) {
       const res = await invoke('add_absence', {
         userId: currentUser.id,
         startDate: absenceStart.value,
-        endDate: absenceEnd.value,
+        endDate: absenceEnd.value || absenceStart.value,
         absenceType: absenceType.value
       });
       if (absenceMsg) {
         absenceMsg.style.color = "var(--accent)";
         absenceMsg.textContent = res;
       }
+      absPickStart = null;
       await loadAbsences();
     } catch (err) {
       if (absenceMsg) {
@@ -841,6 +1091,7 @@ if (formAddAbsence) {
   });
 }
 
+// Zostawione dla zgodności (pojedynczy wpis)
 window.deleteAbsenceEntry = async (id) => {
   if (confirm("Czy na pewno chcesz usunąć tę nieobecność?")) {
     try {
@@ -1196,11 +1447,11 @@ window.rcpAddForDay = (date) => openAddModal(date);
 
 // Przejście do zakładki Urlopy z podstawionym dniem
 window.rcpAbsenceForDay = (date) => {
-  switchTab('absences');
-  const start = document.getElementById('absence-start');
-  const end = document.getElementById('absence-end');
-  if (start) start.value = date;
-  if (end) end.value = date;
+  absYear = Number(date.slice(0, 4));
+  absPickStart = null;
+  if (absenceStart) absenceStart.value = date;
+  if (absenceEnd) absenceEnd.value = date;
+  switchTab('absences'); // loadAbsences() odświeży kalendarz roczny i podgląd zakresu
 };
 
 function renderMonthChart(model) {
@@ -1297,6 +1548,10 @@ window.rcpToggleDay = (date) => {
 
 // 7. Obsługa Ustawień
 async function loadSettings() {
+  if (currentUser) {
+    setText('settings-username', currentUser.username);
+    setText('settings-role', currentUser.role === 'admin' ? 'Rola: administrator' : 'Rola: użytkownik');
+  }
   try {
     const totalSeconds = await invoke('get_daily_target_seconds');
     targetHours.value = Math.floor(totalSeconds / 3600);
@@ -1348,6 +1603,8 @@ window.openEditModal = (id, date, timeIn, timeOut, eventType) => {
   editTimeIn.value = timeIn.split(' ')[1] || timeIn;
   editTimeOut.value = timeOut ? (timeOut.split(' ')[1] || timeOut) : '';
   editEventType.value = eventType;
+  syncEditType();
+  setDialogDeleteVisible(true);
   editDialog.showModal();
 };
 
@@ -1368,6 +1625,8 @@ function openAddModal(date) {
   editTimeIn.value = "08:00:00";
   editTimeOut.value = "16:00:00";
   editEventType.value = "work";
+  syncEditType();
+  setDialogDeleteVisible(false);
   editDialog.showModal();
 }
 
@@ -1378,6 +1637,61 @@ btnAddManual.addEventListener('click', () => {
 });
 
 btnDialogCancel.addEventListener('click', () => editDialog.close());
+
+// Okno edycji (redesign etap 4): typ jako 3 przyciski (sterują ukrytym <select>),
+// czas trwania liczony na żywo, przycisk Usuń przy edycji istniejącego wpisu
+const editTypeButtons = document.querySelectorAll('#edit-type-group button');
+const editDuration = document.getElementById('edit-duration');
+const btnDialogDelete = document.getElementById('btn-dialog-delete');
+
+function syncEditType() {
+  editTypeButtons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.type === editEventType.value)));
+  updateEditDuration();
+}
+
+editTypeButtons.forEach(b => b.addEventListener('click', () => {
+  editEventType.value = b.dataset.type;
+  syncEditType();
+}));
+
+// "8:00", "08:00", "08:00:00", "8.00" → sekundy od północy (null, gdy błędny format) – jak normalize_time w backendzie
+function parseTimeInput(str) {
+  const m = String(str || '').trim().match(/^(\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?$/);
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2]), se = Number(m[3] || 0);
+  if (h > 23 || mi > 59 || se > 59) return null;
+  return h * 3600 + mi * 60 + se;
+}
+
+function updateEditDuration() {
+  if (!editDuration) return;
+  const tin = parseTimeInput(editTimeIn.value);
+  const outRaw = editTimeOut.value.trim();
+  const colors = { work: 'var(--accent)', break_private: 'var(--private)', business: 'var(--business)' };
+  if (tin === null) { editDuration.textContent = '—'; editDuration.style.color = 'var(--text-muted)'; return; }
+  if (!outRaw) { editDuration.textContent = 'w trakcie'; editDuration.style.color = 'var(--text-muted)'; return; }
+  const tout = parseTimeInput(outRaw);
+  if (tout === null) { editDuration.textContent = 'zły format'; editDuration.style.color = 'var(--negative)'; return; }
+  if (tout < tin) { editDuration.textContent = 'Stop przed Start'; editDuration.style.color = 'var(--negative)'; return; }
+  editDuration.textContent = formatHM(tout - tin);
+  editDuration.style.color = colors[editEventType.value] || 'inherit';
+}
+
+editTimeIn.addEventListener('input', updateEditDuration);
+editTimeOut.addEventListener('input', updateEditDuration);
+
+function setDialogDeleteVisible(visible) {
+  if (btnDialogDelete) btnDialogDelete.style.display = visible ? 'inline-flex' : 'none';
+}
+
+if (btnDialogDelete) btnDialogDelete.addEventListener('click', async () => {
+  const id = parseInt(editId.value);
+  if (!id) return;
+  editDialog.close();
+  await window.deleteLogEntry(id);
+});
+const btnLogoutSettings = document.getElementById('btn-logout-settings');
+if (btnLogoutSettings) btnLogoutSettings.addEventListener('click', () => btnLogout.click());
 const btnDialogClose = document.getElementById('btn-dialog-close');
 if (btnDialogClose) btnDialogClose.addEventListener('click', () => editDialog.close());
 
