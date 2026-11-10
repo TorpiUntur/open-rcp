@@ -188,6 +188,10 @@
             </div>
 
             <div class="toolbar">
+              <div class="segmented" role="group" aria-label="Widok miesiąca">
+                <button type="button" id="btn-view-calendar" aria-pressed="true">Kalendarz</button>
+                <button type="button" id="btn-view-list" aria-pressed="false">Lista</button>
+              </div>
               <label for="input-import-csv" class="icon-btn" title="Importuj CSV" aria-label="Importuj CSV">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M17 8l-5-5-5 5"></path><path d="M12 3v12"></path></svg>
               </label>
@@ -201,28 +205,60 @@
 
           <p id="csv-msg" class="inline-msg"></p>
 
-          <section class="panel" aria-label="Wykres godzin">
-            <h2 class="panel-title">Godziny dziennie</h2>
-            <div id="chart-container" class="chart"></div>
-          </section>
+          <!-- Podsumowanie miesiąca (renderMonthSummary) -->
+          <section id="month-summary" class="stat-strip stat-strip-sm" aria-label="Podsumowanie miesiąca"></section>
 
-          <section class="panel panel-flush" aria-label="Wpisy">
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Dzień</th>
-                    <th>Start</th>
-                    <th>Stop</th>
-                    <th>Czas</th>
-                    <th>Typ</th>
-                    <th><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);">Akcje</span></th>
-                  </tr>
-                </thead>
-                <tbody id="logs-table-body"></tbody>
-              </table>
-            </div>
-          </section>
+          <!-- Widok: Kalendarz -->
+          <div id="month-calendar-view" class="month-split">
+            <section class="cal" aria-label="Kalendarz miesiąca">
+              <div class="cal-head" aria-hidden="true">
+                <span>PN</span><span>WT</span><span>ŚR</span><span>CZ</span><span>PT</span><span>SO</span><span>ND</span>
+              </div>
+              <div id="month-calendar" class="cal-grid"></div>
+              <div class="cal-legend" aria-hidden="true">
+                <span class="legend-item"><span class="swatch-bar c-norm"></span>norma, saldo na plus</span>
+                <span class="legend-item"><span class="swatch-bar c-norm-debt"></span>norma, odrabianie długu</span>
+                <span class="legend-item"><span class="swatch-bar c-ok"></span>poniżej normy, saldo na plus</span>
+                <span class="legend-item"><span class="swatch-bar c-debt"></span>dług</span>
+              </div>
+            </section>
+            <aside id="month-day-panel" class="day-panel" aria-label="Szczegóły dnia"></aside>
+          </div>
+
+          <!-- Widok: Lista (wykres + tabela grupowana po dniach) -->
+          <div id="month-list-view" style="display: none;">
+            <section class="panel" aria-labelledby="h-month-chart">
+              <div class="panel-head">
+                <h2 id="h-month-chart" class="panel-title">Godziny dziennie i saldo narastająco</h2>
+                <div class="legend" aria-hidden="true">
+                  <span class="legend-item"><span class="swatch c-norm"></span>norma, saldo na plus</span>
+                  <span class="legend-item"><span class="swatch c-norm-debt"></span>norma, odrabianie długu</span>
+                  <span class="legend-item"><span class="swatch c-ok"></span>poniżej normy, saldo na plus</span>
+                  <span class="legend-item"><span class="swatch c-debt"></span>dług</span>
+                </div>
+              </div>
+              <div id="chart-container" class="mchart-scroll"></div>
+            </section>
+
+            <section class="panel panel-flush" aria-label="Wpisy">
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Dzień</th>
+                      <th>Wejście</th>
+                      <th>Wyjście</th>
+                      <th>Praca</th>
+                      <th>Prywatne</th>
+                      <th>Saldo dnia</th>
+                      <th style="text-align: right;">Wpisy</th>
+                    </tr>
+                  </thead>
+                  <tbody id="logs-table-body"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
         </section>
 
         <!-- WIDOK 3: USTAWIENIA -->

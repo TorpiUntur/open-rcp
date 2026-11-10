@@ -747,27 +747,15 @@ async function updateUI() {
       month: Number(selectedMonth) // <-- rzutujemy na Number!
     });
     
-    tableBody.innerHTML = logs.length === 0
-      ? `<tr><td colspan="6" class="muted" style="text-align: center;">Brak wpisów w tym miesiącu.</td></tr>`
-      : logs.map(log => `
-      <tr class="row-${log.event_type}">
-        <td>${formatDayLabel(log.date)}</td>
-        <td class="num">${timePart(log.time_in)}</td>
-        <td class="num">${log.time_out ? timePart(log.time_out) : '<span class="chip chip-open">trwa</span>'}</td>
-        <td class="num"><b>${log.duration_seconds !== null ? formatSeconds(log.duration_seconds, false) : '—'}</b></td>
-        <td><span class="chip chip-${log.event_type}">${eventLabels[log.event_type] || log.event_type}</span></td>
-        <td class="actions">
-          <button class="icon-btn icon-btn-plain" title="Edytuj wpis" aria-label="Edytuj wpis" onclick="openEditModal(${log.id}, '${log.date}', '${log.time_in}', '${log.time_out || ''}', '${log.event_type}')">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>
-          </button>
-          <button class="icon-btn icon-btn-plain icon-btn-danger" title="Usuń wpis" aria-label="Usuń wpis" onclick="deleteLogEntry(${log.id})">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path></svg>
-          </button>
-        </td>
-      </tr>
-    `).join('');
-
-    renderChart(logs);
+    // Zakładka Miesiąc (redesign etap 3): model miesiąca → kalendarz, wykres, tabela
+    monthLogs = logs || [];
+    try {
+      monthAbsences = (await invoke('get_absences', { userId: Number(activeUserId) })) || [];
+    } catch (absErr) {
+      console.error('Błąd pobierania nieobecności:', absErr);
+      monthAbsences = [];
+    }
+    renderMonth();
 
     // Przyciskami RCP steruje tylko aktualnie zalogowany użytkownik na swoje konto.
     // Stan przycisków = dzisiejsza otwarta sesja (niezależnie od filtra w Raportach)
@@ -903,51 +891,409 @@ const btnMonthNext = document.getElementById('btn-month-next');
 if (btnMonthPrev) btnMonthPrev.addEventListener('click', () => shiftMonth(-1));
 if (btnMonthNext) btnMonthNext.addEventListener('click', () => shiftMonth(1));
 
-// Funkcja renderująca wykres słupkowy w CSS/HTML
-function renderChart(logs) {
-  if (!chartContainer) return;
-  chartContainer.innerHTML = '';
+// ==========================================
+// ZAKŁADKA MIESIĄC (redesign etap 3): kalendarz, wykres z saldem narastającym, tabela grupowana
+// ==========================================
+let monthLogs = [];          // wpisy wybranego miesiąca (oglądany użytkownik)
+let monthAbsences = [];      // wszystkie nieobecności oglądanego użytkownika
+let selectedDay = null;      // dzień wybrany w kalendarzu ('YYYY-MM-DD')
+const expandedDays = new Set(); // rozwinięte dni w tabeli
+let monthView = 'calendar';  // 'calendar' | 'list' – zapamiętywane lokalnie
+try {
+  const savedView = localStorage.getItem('rcp-month-view');
+  if (savedView === 'list' || savedView === 'calendar') monthView = savedView;
+} catch (e) { /* brak dostępu do localStorage – zostaje kalendarz */ }
 
-  // Agregacja sekund pracy per dzień miesiąca
-  const dailySeconds = {};
-  logs.forEach(log => {
-    if ((log.event_type === 'work' || log.event_type === 'business') && log.duration_seconds) {
-      dailySeconds[log.date] = (dailySeconds[log.date] || 0) + log.duration_seconds;
+const ICON_EDIT = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>';
+const ICON_DELETE = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path></svg>';
+const ICON_CHEVRON_DOWN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>';
+const ICON_CHEVRON_UP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 15l-6-6-6 6"></path></svg>';
+
+// Czas trwania wpisu w sekundach (trwający wpis liczony do teraz)
+function entrySeconds(log) {
+  if (log.time_out) return log.duration_seconds || 0;
+  const t = parseLocalTimestamp(log.time_in);
+  return t ? Math.max(0, Math.floor((Date.now() - t.getTime()) / 1000)) : 0;
+}
+
+// Model miesiąca: wszystkie dni z sumami, normą i saldem narastającym.
+// Zasady jak w backendzie: saldo liczone tylko z dni z wpisami; dzień z trwającą sesją
+// (dziś) nie wchodzi do salda narastającego. Norma = 0 w weekend/święto, w pozostałe dni
+// bieżąca norma z ustawień (historia normy jest tylko w backendzie – drobne różnice
+// możliwe, jeśli norma zmieniła się w trakcie miesiąca).
+function buildMonthModel() {
+  const y = Number(selectedYear);
+  const m = Number(selectedMonth);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const today = localDateString();
+  const prefix = `${y}-${pad2(m)}-`;
+
+  const absences = {};
+  monthAbsences.forEach(a => { if (a.date && a.date.startsWith(prefix)) absences[a.date] = a.absence_type; });
+
+  const byDate = {};
+  monthLogs.forEach(l => { (byDate[l.date] = byDate[l.date] || []).push(l); });
+
+  const days = [];
+  let run = 0;
+  let workingDays = 0;
+  let workedWorkingDays = 0;
+  let totalWorked = 0;
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = prefix + pad2(d);
+    const entries = (byDate[date] || []).slice().sort((a, b) => a.time_in.localeCompare(b.time_in));
+    const holiday = isPolishHoliday(date);
+    const weekday = new Date(y, m - 1, d).getDay();
+    const weekend = weekday === 0 || weekday === 6;
+    const nonWorking = weekend || holiday;
+    const norm = nonWorking ? 0 : defaultTargetSeconds;
+    const open = entries.some(e => !e.time_out);
+
+    let worked = 0;
+    let priv = 0;
+    entries.forEach(e => {
+      const s = entrySeconds(e);
+      if (e.event_type === 'break_private') priv += s; else worked += s;
+    });
+    totalWorked += worked;
+
+    const day = {
+      date, d, weekday, weekend, holiday, nonWorking, norm, entries, worked, priv, open,
+      absence: absences[date] || null,
+      isToday: date === today,
+      isFuture: date > today,
+      firstIn: entries.length ? timePart(entries[0].time_in).slice(0, 5) : '',
+      lastOut: open ? '' : (entries.length ? timePart(entries[entries.length - 1].time_out).slice(0, 5) : ''),
+      bal: null, run: null, colorClass: ''
+    };
+
+    if (!nonWorking) {
+      workingDays++;
+      if (entries.length) workedWorkingDays++;
     }
+
+    if (entries.length) {
+      if (open) {
+        day.colorClass = 'c-live';
+      } else {
+        day.bal = worked - norm;
+        run += day.bal;
+        day.run = run;
+        const debt = run < 0;
+        day.colorClass = worked >= norm ? (debt ? 'c-norm-debt' : 'c-norm') : (debt ? 'c-debt' : 'c-ok');
+      }
+    }
+    days.push(day);
+  }
+
+  const absenceDays = Object.keys(absences).length;
+  return { y, m, days, run, workingDays, workedWorkingDays, totalWorked, absenceDays };
+}
+
+function renderMonth() {
+  const model = buildMonthModel();
+  applyMonthView();
+  renderMonthSummary(model);
+  renderMonthCalendar(model);
+  renderDayPanel(model);
+  renderMonthChart(model);
+  renderMonthTable(model);
+}
+
+function applyMonthView() {
+  const cal = document.getElementById('month-calendar-view');
+  const list = document.getElementById('month-list-view');
+  if (cal) cal.style.display = monthView === 'calendar' ? 'flex' : 'none';
+  if (list) list.style.display = monthView === 'list' ? 'block' : 'none';
+  const bc = document.getElementById('btn-view-calendar');
+  const bl = document.getElementById('btn-view-list');
+  if (bc) bc.setAttribute('aria-pressed', String(monthView === 'calendar'));
+  if (bl) bl.setAttribute('aria-pressed', String(monthView === 'list'));
+}
+
+function setMonthView(view) {
+  monthView = view;
+  try { localStorage.setItem('rcp-month-view', view); } catch (e) { /* bez zapamiętywania */ }
+  applyMonthView();
+}
+
+const btnViewCalendar = document.getElementById('btn-view-calendar');
+const btnViewList = document.getElementById('btn-view-list');
+if (btnViewCalendar) btnViewCalendar.addEventListener('click', () => setMonthView('calendar'));
+if (btnViewList) btnViewList.addEventListener('click', () => setMonthView('list'));
+
+function renderMonthSummary(model) {
+  const el = document.getElementById('month-summary');
+  if (!el) return;
+  const now = new Date();
+  const isCurrentOwn = !isViewingOtherUser() && model.y === now.getFullYear() && model.m === now.getMonth() + 1;
+  // Bieżący miesiąc zalogowanego użytkownika: saldo jak na ekranie Dziś (z backendu + na żywo)
+  const balance = isCurrentOwn && currentStats ? currentBalanceSeconds() : model.run;
+  el.innerHTML = `
+    <div class="stat"><span class="stat-label">Przepracowano</span><span class="stat-value">${formatHM(model.totalWorked)}</span></div>
+    <div class="stat"><span class="stat-label">Saldo</span><span class="stat-value" style="color: ${balance >= 0 ? 'var(--positive)' : 'var(--negative)'};">${formatSeconds(balance, true)}</span></div>
+    <div class="stat"><span class="stat-label">Dni robocze z pracą</span><span class="stat-value">${model.workedWorkingDays} <small>/ ${model.workingDays}</small></span></div>
+    <div class="stat"><span class="stat-label">Nieobecności</span><span class="stat-value" style="color: ${model.absenceDays ? '#c4b5fd' : 'inherit'};">${model.absenceDays} <small>dni</small></span></div>`;
+}
+
+function renderMonthCalendar(model) {
+  const el = document.getElementById('month-calendar');
+  if (!el) return;
+  const first = model.days[0];
+  const lead = (first.weekday + 6) % 7; // poniedziałek = 0
+  const cells = [];
+  for (let i = 0; i < lead; i++) cells.push('<div class="cal-cell out" aria-hidden="true"></div>');
+
+  const sel = currentSelectedDay(model);
+  model.days.forEach(day => {
+    const cls = ['cal-cell'];
+    if (day.weekend) cls.push('weekend');
+    if (day.holiday) cls.push('holiday');
+    if (day.isFuture && !day.weekend && !day.holiday && !day.absence) cls.push('future');
+    if (day.absence && !day.entries.length) cls.push('abs-' + day.absence);
+    if (day.isToday) cls.push('today');
+    if (day.date === sel) cls.push('selected');
+
+    let tag = '';
+    let tagCls = '';
+    if (day.isToday) { tag = 'dziś'; tagCls = 't-today'; }
+    else if (day.absence) { tag = absenceShort[day.absence] || 'nieobecność'; tagCls = 't-' + day.absence; }
+    else if (day.holiday) { tag = 'święto'; }
+
+    let hours = '';
+    let bar = '';
+    let sub = '';
+    let subColor = '';
+    if (day.entries.length) {
+      hours = formatHM(day.worked);
+      const frac = day.norm > 0 ? Math.min(1, day.worked / day.norm) : 1;
+      bar = `<div class="cal-bar"><span class="${day.colorClass}" style="width: ${Math.round(frac * 100)}%;"></span></div>`;
+      if (day.open) { sub = 'trwa'; subColor = 'var(--accent)'; }
+      else { sub = formatHM(day.bal, true); subColor = day.bal >= 0 ? 'var(--positive)' : '#e07a75'; }
+    } else if (day.absence) {
+      sub = ''; // nazwa nieobecności jest już w etykiecie (urlop / L4)
+    } else if (!day.nonWorking && !day.isFuture && !day.isToday) {
+      sub = 'brak wpisów';
+    }
+
+    const aria = `${day.d} ${MONTHS_GENITIVE[model.m - 1]}${hours ? ', ' + hours : ''}${tag ? ', ' + tag : ''}`;
+    cells.push(`<button type="button" class="${cls.join(' ')}" aria-label="${aria}" aria-pressed="${day.date === sel}" onclick="rcpSelectDay('${day.date}')">
+      <span class="cal-top"><span class="cal-num">${day.d}</span><span class="cal-tag ${tagCls}">${tag}</span></span>
+      <span class="cal-hours">${hours}</span>
+      ${bar}
+      <span class="cal-sub" style="${subColor ? 'color: ' + subColor + ';' : ''}">${sub}</span>
+    </button>`);
   });
 
-  const dates = Object.keys(dailySeconds).sort();
-  if (dates.length === 0) {
-    chartContainer.innerHTML = '<p class="chart-empty">Brak danych do wyświetlenia wykresu dla tego miesiąca.</p>';
+  const trail = (7 - (cells.length % 7)) % 7;
+  for (let i = 0; i < trail; i++) cells.push('<div class="cal-cell out" aria-hidden="true"></div>');
+  el.innerHTML = cells.join('');
+}
+
+const absenceShort = { vacation: 'urlop', sick_leave: 'L4', other: 'nieobecność' };
+
+// Wybrany dzień: kliknięty; domyślnie dziś (gdy w tym miesiącu), inaczej ostatni dzień z wpisami
+function currentSelectedDay(model) {
+  const prefix = `${model.y}-${pad2(model.m)}-`;
+  if (selectedDay && selectedDay.startsWith(prefix)) return selectedDay;
+  const today = model.days.find(d => d.isToday);
+  if (today) return today.date;
+  const withEntries = model.days.filter(d => d.entries.length);
+  return withEntries.length ? withEntries[withEntries.length - 1].date : model.days[0].date;
+}
+
+window.rcpSelectDay = (date) => {
+  selectedDay = date;
+  const model = buildMonthModel();
+  renderMonthCalendar(model);
+  renderDayPanel(model);
+};
+
+function entryRowHtml(e) {
+  const dur = entrySeconds(e);
+  const range = `${timePart(e.time_in).slice(0, 5)}–${e.time_out ? timePart(e.time_out).slice(0, 5) : 'teraz'}`;
+  return `<div class="entry">
+    <span class="entry-mark ${e.event_type}"></span>
+    <div class="entry-main">
+      <div class="entry-range">${range}</div>
+      <div class="entry-type">${eventLabels[e.event_type] || e.event_type}</div>
+    </div>
+    <span class="entry-dur">${formatHM(dur)}</span>
+    <button class="icon-btn icon-btn-plain" title="Edytuj wpis" aria-label="Edytuj wpis ${range}" onclick="openEditModal(${e.id}, '${e.date}', '${e.time_in}', '${e.time_out || ''}', '${e.event_type}')">${ICON_EDIT}</button>
+    <button class="icon-btn icon-btn-plain icon-btn-danger" title="Usuń wpis" aria-label="Usuń wpis ${range}" onclick="deleteLogEntry(${e.id})">${ICON_DELETE}</button>
+  </div>`;
+}
+
+function renderDayPanel(model) {
+  const el = document.getElementById('month-day-panel');
+  if (!el) return;
+  const date = currentSelectedDay(model);
+  const day = model.days.find(d => d.date === date);
+  if (!day) { el.innerHTML = ''; return; }
+
+  let badge = '';
+  if (day.open) badge = 'trwa';
+  else if (day.entries.length) badge = 'zamknięty';
+  else if (day.absence) badge = absenceShort[day.absence];
+  else if (day.holiday) badge = 'święto';
+  else if (day.weekend) badge = 'weekend';
+
+  // Mini oś 06–20 (poszerzana, gdy wpisy wychodzą poza zakres)
+  let lo = 6, hi = 20;
+  day.entries.forEach(e => {
+    const a = parseLocalTimestamp(e.time_in);
+    const b = parseLocalTimestamp(e.time_out) || new Date();
+    if (a) lo = Math.min(lo, a.getHours());
+    if (b && localDateString(b) === day.date) hi = Math.max(hi, b.getHours() + 1);
+  });
+  lo = Math.max(0, lo - (lo % 2));
+  hi = Math.min(24, hi + (hi % 2));
+  const toPct = (d) => {
+    const h = d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+    return Math.min(100, Math.max(0, (h - lo) / (hi - lo) * 100));
+  };
+  const blocks = day.entries.map(e => {
+    const a = parseLocalTimestamp(e.time_in);
+    if (!a) return '';
+    const b = parseLocalTimestamp(e.time_out) || new Date();
+    const left = toPct(a);
+    return `<div class="axis-block ${e.event_type}" style="left: ${left}%; width: ${Math.max(0, toPct(b) - left)}%;"></div>`;
+  }).join('');
+  const midTicks = [lo, Math.round((lo + hi) / 2), hi];
+
+  const balText = day.open ? 'trwa' : (day.entries.length ? formatHM(day.bal, true) : '—');
+  const balColor = day.open || !day.entries.length ? 'inherit' : (day.bal >= 0 ? 'var(--positive)' : 'var(--negative)');
+  const viewingOther = isViewingOtherUser();
+
+  el.innerHTML = `
+    <div class="day-panel-head">
+      <div>
+        <div class="eyebrow">${WEEKDAYS_LONG[day.weekday]}</div>
+        <h2>${day.d} ${MONTHS_GENITIVE[model.m - 1]}</h2>
+      </div>
+      ${badge ? `<span class="badge">${badge}</span>` : ''}
+    </div>
+    ${day.entries.length ? `
+      <div>
+        <div class="mini-axis">${blocks}</div>
+        <div class="mini-ticks">${midTicks.map(h => `<span>${pad2(h)}</span>`).join('')}</div>
+      </div>
+      <div class="mini-stats">
+        <div>Praca<b>${formatHM(day.worked)}</b></div>
+        <div>Prywatne<b style="color: ${day.priv ? 'var(--private)' : 'inherit'};">${formatHM(day.priv)}</b></div>
+        <div>Saldo<b style="color: ${balColor};">${balText}</b></div>
+      </div>
+      <div class="entry-list">${day.entries.map(entryRowHtml).join('')}</div>`
+    : `<p class="muted" style="font-size: 13px;">${day.absence ? (absenceLabels[day.absence] || 'Nieobecność') + '.' : 'Brak wpisów w tym dniu.'}</p>`}
+    <div class="form-stack" style="gap: 8px;">
+      <button type="button" class="btn btn-light" onclick="rcpAddForDay('${day.date}')">+ Dodaj wpis</button>
+      ${viewingOther ? '' : `<button type="button" class="btn btn-ghost" style="color: #c4b5fd;" onclick="rcpAbsenceForDay('${day.date}')">Oznacz nieobecność</button>`}
+    </div>`;
+}
+
+window.rcpAddForDay = (date) => openAddModal(date);
+
+// Przejście do zakładki Urlopy z podstawionym dniem
+window.rcpAbsenceForDay = (date) => {
+  switchTab('absences');
+  const start = document.getElementById('absence-start');
+  const end = document.getElementById('absence-end');
+  if (start) start.value = date;
+  if (end) end.value = date;
+};
+
+function renderMonthChart(model) {
+  if (!chartContainer) return;
+  const days = model.days.filter(d => d.entries.length);
+  if (days.length === 0) {
+    chartContainer.innerHTML = '<p class="chart-empty" style="padding: 30px 0; text-align: center;">Brak danych do wyświetlenia wykresu dla tego miesiąca.</p>';
     return;
   }
 
-  // Generowanie słupków
-  dates.forEach(date => {
-    const totalSec = dailySeconds[date];
-    const hours = totalSec / 3600;
-    // Wysokość słupka (norma 8h = 100px wysokości)
-    const heightPx = Math.min(Math.round((hours / 8) * 100), 140);
-    const dayNum = date.split('-')[2];
+  const BAR_AREA = 140; // px
+  const scale = Math.max(10 * 3600, defaultTargetSeconds * 1.25, ...days.map(d => d.worked));
+  const normPx = Math.round(defaultTargetSeconds / scale * BAR_AREA);
 
-    const barWrapper = document.createElement('div');
-    barWrapper.style.display = 'flex';
-    barWrapper.style.flexDirection = 'column';
-    barWrapper.style.alignItems = 'center';
-    barWrapper.style.flex = '1';
-    barWrapper.style.minWidth = '24px';
-    barWrapper.title = `${date}: ${formatSeconds(totalSec, false)}`;
+  const cols = days.map(d => {
+    const h = Math.max(2, Math.round(d.worked / scale * BAR_AREA));
+    const title = `${formatDayLabel(d.date).replace(/<[^>]+>/g, '')}: ${formatHM(d.worked)}${d.open ? ' (trwa)' : `, saldo dnia ${formatHM(d.bal, true)}, saldo miesiąca ${formatHM(d.run, true)}`}`;
+    return `<div class="mchart-col" title="${title}">
+      <span>${(d.worked / 3600).toFixed(1).replace('.', ',')}</span>
+      <div class="mchart-bar ${d.colorClass}" style="height: ${h}px;"></div>
+    </div>`;
+  }).join('');
+  const labels = days.map(d => `<span>${pad2(d.d)}</span>`).join('');
 
-    // Etap 1 redesignu: tylko nowe kolory; schemat 4 stanów (saldo narastająco) – etap 3
-    barWrapper.innerHTML = `
-      <span style="font-size: 10px; color: var(--text-muted); margin-bottom: 4px; font-family: var(--mono);">${hours.toFixed(1).replace('.', ',')}</span>
-      <div style="width: 100%; max-width: 22px; height: ${heightPx}px; background: ${hours >= 8 ? 'var(--accent)' : 'var(--accent-soft)'}; border-radius: 4px 4px 1px 1px;"></div>
-      <span style="font-size: 11px; font-weight: 600; margin-top: 4px; font-family: var(--mono);">${dayNum}</span>
-    `;
-
-    chartContainer.appendChild(barWrapper);
+  // Saldo narastające (bez dnia w toku)
+  const pts = [];
+  const runs = [];
+  days.forEach((d, i) => {
+    if (d.run === null) return;
+    runs.push({ i, v: d.run });
   });
+  let line = '';
+  if (runs.length) {
+    const vals = runs.map(r => r.v);
+    const vmin = Math.min(0, ...vals);
+    const vmax = Math.max(0, ...vals);
+    const span = Math.max(vmax - vmin, 3600);
+    const yOf = (v) => (6 + (vmax - v) / span * 52).toFixed(1);
+    runs.forEach(r => pts.push(`${((r.i + 0.5) / days.length * 1000).toFixed(1)},${yOf(r.v)}`));
+    const last = runs[runs.length - 1].v;
+    line = `
+      <svg class="mchart-line" viewBox="0 0 1000 64" preserveAspectRatio="none" role="img" aria-label="Saldo narastająco: na koniec ${formatHM(last, true)}">
+        <line x1="0" y1="${yOf(0)}" x2="1000" y2="${yOf(0)}" stroke="#2a313b" stroke-width="1" vector-effect="non-scaling-stroke"></line>
+        <polyline points="${pts.join(' ')}" fill="none" stroke="#f5b544" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"></polyline>
+      </svg>
+      <div class="mchart-foot"><span>saldo narastająco · linia = 0</span><span>ostatni zamknięty dzień: <b style="color: ${last >= 0 ? 'var(--positive)' : 'var(--negative)'};">${formatHM(last, true)}</b></span></div>`;
+  }
+
+  chartContainer.innerHTML = `
+    <div class="mchart">
+      <div class="mchart-bars">
+        <div class="mchart-norm" style="bottom: ${normPx}px;" title="norma ${formatHM(defaultTargetSeconds)}"></div>
+        ${cols}
+      </div>
+      <div class="mchart-days">${labels}</div>
+      ${line}
+    </div>`;
 }
+
+function renderMonthTable(model) {
+  if (!tableBody) return;
+  const days = model.days.filter(d => d.entries.length).reverse(); // najnowsze na górze
+  if (days.length === 0) {
+    tableBody.innerHTML = '<tr><td colspan="7" class="muted" style="text-align: center;">Brak wpisów w tym miesiącu.</td></tr>';
+    return;
+  }
+  tableBody.innerHTML = days.map(d => {
+    const open = expandedDays.has(d.date);
+    const balCell = d.open
+      ? '<span class="chip chip-open">trwa</span>'
+      : `<span style="color: ${d.bal >= 0 ? 'var(--positive)' : 'var(--negative)'};">${formatHM(d.bal, true)}</span>`;
+    const main = `<tr class="day-row ${open ? 'expanded' : ''}">
+      <td>${formatDayLabel(d.date)}</td>
+      <td class="num">${d.firstIn}</td>
+      <td class="num">${d.open ? '<span class="chip chip-open">trwa</span>' : d.lastOut}</td>
+      <td class="num"><b>${formatHM(d.worked)}</b></td>
+      <td class="num" style="color: ${d.priv ? 'var(--private)' : 'var(--text-muted)'};">${d.priv ? formatHM(d.priv) : '—'}</td>
+      <td class="num">${balCell}</td>
+      <td class="actions">
+        <button type="button" class="expander" aria-expanded="${open}" aria-label="${open ? 'Zwiń' : 'Rozwiń'} wpisy dnia ${d.date}" onclick="rcpToggleDay('${d.date}')">${d.entries.length}${open ? ICON_CHEVRON_UP : ICON_CHEVRON_DOWN}</button>
+      </td>
+    </tr>`;
+    const detail = open
+      ? `<tr class="day-detail"><td colspan="7"><div class="entry-box">${d.entries.map(entryRowHtml).join('')}</div></td></tr>`
+      : '';
+    return main + detail;
+  }).join('');
+}
+
+window.rcpToggleDay = (date) => {
+  if (expandedDays.has(date)) expandedDays.delete(date); else expandedDays.add(date);
+  renderMonthTable(buildMonthModel());
+};
 
 // 7. Obsługa Ustawień
 async function loadSettings() {
@@ -1014,14 +1360,21 @@ window.deleteLogEntry = async (id) => {
   }
 };
 
-btnAddManual.addEventListener('click', () => {
+// Nowy wpis – domyślnie dziś, z kalendarza: wybrany dzień
+function openAddModal(date) {
   dialogTitle.textContent = "Nowy wpis";
   editId.value = "";
-  editDate.value = localDateString(); // lokalna data (toISOString daje UTC → po północy "wczoraj")
+  editDate.value = date || localDateString(); // lokalna data (toISOString daje UTC → po północy "wczoraj")
   editTimeIn.value = "08:00:00";
   editTimeOut.value = "16:00:00";
   editEventType.value = "work";
   editDialog.showModal();
+}
+
+btnAddManual.addEventListener('click', () => {
+  // W widoku kalendarza nowy wpis trafia na wybrany dzień
+  const day = monthView === 'calendar' && selectedDay ? selectedDay : null;
+  openAddModal(day);
 });
 
 btnDialogCancel.addEventListener('click', () => editDialog.close());
