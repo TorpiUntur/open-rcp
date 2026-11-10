@@ -291,6 +291,36 @@
             </div>
           </section>
 
+          <section class="settings-section" aria-labelledby="s-urlop">
+            <h2 id="s-urlop" class="section-title">Urlop</h2>
+            <form id="form-vacation">
+              <div class="setting-row">
+                <div class="setting-text">
+                  <div class="setting-name">Roczny limit urlopu wypoczynkowego</div>
+                  <div class="setting-hint">Np. 20 lub 26 dni. 0 = bez limitu (licznik w Urlopach pokaże tylko wykorzystane dni).</div>
+                </div>
+                <div class="time-inputs">
+                  <input type="number" id="vac-days-per-year" min="0" max="366" value="0" aria-label="Roczny limit urlopu w dniach" />
+                  <span class="sep">dni</span>
+                </div>
+              </div>
+              <div class="setting-row">
+                <div class="setting-text">
+                  <div class="setting-name">Zaległy urlop przeniesiony na <span id="vac-year"></span></div>
+                  <div class="setting-hint">Dni niewykorzystane w poprzednim roku – doliczane do puli bieżącego roku.</div>
+                </div>
+                <div class="time-inputs">
+                  <input type="number" id="vac-carryover" min="0" max="366" value="0" aria-label="Zaległy urlop w dniach" />
+                  <span class="sep">dni</span>
+                </div>
+              </div>
+              <div class="setting-row">
+                <p id="vac-msg" class="inline-msg setting-text" style="margin: 0;"></p>
+                <button type="submit" class="btn btn-light" style="margin-left: auto;">Zapisz</button>
+              </div>
+            </form>
+          </section>
+
           <section class="settings-section" aria-labelledby="s-konto">
             <h2 id="s-konto" class="section-title">Konto</h2>
             <div class="setting-row">

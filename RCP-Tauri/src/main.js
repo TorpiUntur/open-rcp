@@ -794,6 +794,27 @@ async function updateUI() {
 let absenceList = [];                   // wszystkie nieobecności zalogowanego użytkownika
 let absYear = new Date().getFullYear(); // rok w widoku Urlopy
 let absPickStart = null;                // pierwszy klik w kalendarzu rocznym (czeka na drugi)
+let vacationSettings = { year: absYear, days_per_year: 0, carryover_days: 0 }; // limit urlopu (etap 5a)
+
+// Limit urlopu dla roku z widoku Urlopy (pula = limit roczny + zaległy urlop na ten rok)
+async function loadVacationSettings() {
+  try {
+    vacationSettings = await invoke('get_vacation_settings', { year: absYear });
+  } catch (err) {
+    console.error('Błąd odczytu limitu urlopu:', err);
+    vacationSettings = { year: absYear, days_per_year: 0, carryover_days: 0 };
+  }
+}
+
+function vacationPool() {
+  const s = vacationSettings || {};
+  return (s.days_per_year || 0) + (s.carryover_days || 0);
+}
+
+// Liczba dni urlopu wypoczynkowego w roku (tylko dni robocze)
+function vacationDaysInYear(year) {
+  return absenceList.filter(a => a.absence_type === 'vacation' && a.date.startsWith(year + '-') && !isNonWorkingDay(a.date)).length;
+}
 
 const MONTHS_SHORT = ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'];
 
@@ -805,6 +826,7 @@ async function loadAbsences() {
     console.error("Błąd ładowania absencji:", err);
     absenceList = [];
   }
+  await loadVacationSettings();
   renderAbsences();
 }
 
@@ -842,9 +864,25 @@ function renderAbsSummary() {
     if (a.absence_type === 'vacation' && a.date > today) vacPlanned++;
   });
   const vacUsed = counts.vacation - vacPlanned;
-  const dni = (n) => (n === 1 ? 'dzień' : 'dni');
+  const dni = (n) => (Math.abs(n) === 1 ? 'dzień' : 'dni');
+  const pool = vacationPool();
+  let vacTile;
+  if (pool > 0) {
+    const left = pool - counts.vacation;
+    const usedPct = Math.min(100, vacUsed / pool * 100);
+    const planPct = Math.min(100 - usedPct, vacPlanned / pool * 100);
+    const carry = vacationSettings.carryover_days || 0;
+    vacTile = `<div class="stat stat-wide">
+      <span class="stat-label">Urlop wypoczynkowy${carry ? ` · pula ${vacationSettings.days_per_year} + ${carry} zaległego` : ''}</span>
+      <span class="stat-value"><span style="color: #c4b5fd;">${counts.vacation}</span> <small>/ ${pool} dni · </small><small style="color: ${left < 0 ? 'var(--negative)' : 'var(--text)'};">${left < 0 ? `ponad limit o ${-left}` : `zostało ${left}`}</small></span>
+      <span class="vac-bar" aria-hidden="true"><span class="vac-used" style="width: ${usedPct}%;"></span><span class="vac-plan" style="width: ${planPct}%;"></span></span>
+      <span class="stat-sub">wykorzystane: ${vacUsed} · zaplanowane: ${vacPlanned}</span>
+    </div>`;
+  } else {
+    vacTile = `<div class="stat"><span class="stat-label">Urlop wypoczynkowy</span><span class="stat-value" style="color: #c4b5fd;">${counts.vacation} <small>${dni(counts.vacation)}</small></span><span class="stat-sub">wykorzystane: ${vacUsed} · zaplanowane: ${vacPlanned} · limit: Ustawienia → Urlop</span></div>`;
+  }
   el.innerHTML = `
-    <div class="stat"><span class="stat-label">Urlop wypoczynkowy</span><span class="stat-value" style="color: #c4b5fd;">${counts.vacation} <small>${dni(counts.vacation)}</small></span><span class="stat-sub">wykorzystane: ${vacUsed} · zaplanowane: ${vacPlanned}</span></div>
+    ${vacTile}
     <div class="stat"><span class="stat-label">L4</span><span class="stat-value" style="color: ${counts.sick_leave ? '#f9a8d4' : 'inherit'};">${counts.sick_leave} <small>${dni(counts.sick_leave)}</small></span><span class="stat-sub">dni robocze</span></div>
     <div class="stat"><span class="stat-label">Inne</span><span class="stat-value">${counts.other} <small>${dni(counts.other)}</small></span><span class="stat-sub">dni robocze</span></div>`;
 }
@@ -927,11 +965,16 @@ function updateAbsencePreview() {
   const byDate = {};
   absenceList.forEach(a => { byDate[a.date] = a.absence_type; });
   let working = 0, skipped = 0, same = 0, other = 0, guard = 0;
+  const newVacByYear = {}; // nowe dni urlopu wypoczynkowego w podziale na lata (do licznika limitu)
   for (let d = from; d <= to && guard < 400; d = addDays(d, 1), guard++) {
     if (isNonWorkingDay(d)) { skipped++; continue; }
     working++;
     if (byDate[d] === absenceType.value) same++;
     else if (byDate[d]) other++;
+    if (absenceType.value === 'vacation' && byDate[d] !== 'vacation') {
+      const y = d.slice(0, 4);
+      newVacByYear[y] = (newVacByYear[y] || 0) + 1;
+    }
   }
   if (guard >= 400) {
     el.innerHTML = '<span style="color: var(--negative);">Zakres dłuższy niż rok.</span>';
@@ -941,8 +984,18 @@ function updateAbsencePreview() {
   if (skipped) notes.push(`pominięte dni wolne: ${skipped}`);
   if (same) notes.push(`już zapisane: ${same}`);
   if (other) notes.push(`zmiana typu: ${other}`);
+  // Limit urlopu (pula roku z widoku Urlopy) – ile zostanie po zapisie
+  let limitLine = '';
+  const pool = vacationPool();
+  const newInYear = newVacByYear[String(absYear)] || 0;
+  if (absenceType.value === 'vacation' && pool > 0 && newInYear > 0) {
+    const leftAfter = pool - vacationDaysInYear(absYear) - newInYear;
+    limitLine = leftAfter < 0
+      ? `<div class="setting-hint" style="color: var(--negative);">po zapisie limit ${absYear} zostanie przekroczony o ${-leftAfter} ${-leftAfter === 1 ? 'dzień' : 'dni'}</div>`
+      : `<div class="setting-hint">po zapisie zostanie ${leftAfter} ${leftAfter === 1 ? 'dzień' : 'dni'} urlopu w ${absYear}</div>`;
+  }
   el.innerHTML = `<b style="color: #c4b5fd;">${working} ${working === 1 ? 'dzień roboczy' : 'dni roboczych'}</b>
-    <div class="setting-hint">${notes.length ? notes.join(' · ') : 'weekendy i święta są pomijane'}</div>`;
+    <div class="setting-hint">${notes.length ? notes.join(' · ') : 'weekendy i święta są pomijane'}</div>${limitLine}`;
 }
 
 if (absenceStart) absenceStart.addEventListener('change', () => {
@@ -1061,8 +1114,8 @@ window.rcpDeleteAbsenceExtra = async (i) => {
 
 const btnAbsYearPrev = document.getElementById('btn-abs-year-prev');
 const btnAbsYearNext = document.getElementById('btn-abs-year-next');
-if (btnAbsYearPrev) btnAbsYearPrev.addEventListener('click', () => { absYear--; renderAbsences(); });
-if (btnAbsYearNext) btnAbsYearNext.addEventListener('click', () => { absYear++; renderAbsences(); });
+if (btnAbsYearPrev) btnAbsYearPrev.addEventListener('click', async () => { absYear--; await loadVacationSettings(); renderAbsences(); });
+if (btnAbsYearNext) btnAbsYearNext.addEventListener('click', async () => { absYear++; await loadVacationSettings(); renderAbsences(); });
 
 if (formAddAbsence) {
   formAddAbsence.addEventListener('submit', async (e) => {
@@ -1547,7 +1600,43 @@ window.rcpToggleDay = (date) => {
 };
 
 // 7. Obsługa Ustawień
+// Ustawienia → Urlop (etap 5a): limit roczny + zaległy urlop na bieżący rok
+const formVacation = document.getElementById('form-vacation');
+const vacDaysInput = document.getElementById('vac-days-per-year');
+const vacCarryInput = document.getElementById('vac-carryover');
+const vacMsg = document.getElementById('vac-msg');
+
+async function loadVacationForm() {
+  const year = new Date().getFullYear();
+  setText('vac-year', String(year));
+  try {
+    const v = await invoke('get_vacation_settings', { year });
+    if (vacDaysInput) vacDaysInput.value = v.days_per_year;
+    if (vacCarryInput) vacCarryInput.value = v.carryover_days;
+  } catch (err) {
+    console.error('Błąd odczytu limitu urlopu:', err);
+  }
+}
+
+if (formVacation) {
+  formVacation.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (vacMsg) vacMsg.textContent = '';
+    try {
+      const res = await invoke('set_vacation_settings', {
+        year: new Date().getFullYear(),
+        daysPerYear: parseInt(vacDaysInput.value) || 0,
+        carryoverDays: parseInt(vacCarryInput.value) || 0
+      });
+      if (vacMsg) { vacMsg.style.color = 'var(--accent)'; vacMsg.textContent = res; }
+    } catch (err) {
+      if (vacMsg) { vacMsg.style.color = 'var(--negative)'; vacMsg.textContent = 'Błąd: ' + err; }
+    }
+  });
+}
+
 async function loadSettings() {
+  loadVacationForm();
   if (currentUser) {
     setText('settings-username', currentUser.username);
     setText('settings-role', currentUser.role === 'admin' ? 'Rola: administrator' : 'Rola: użytkownik');

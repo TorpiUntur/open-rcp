@@ -101,6 +101,8 @@ pub fn run() {
             commands::delete_log,
             commands::get_daily_target_seconds,
             commands::set_daily_target_seconds,
+            commands::get_vacation_settings,
+            commands::set_vacation_settings,
             commands::add_absence,
             commands::get_absences,
             commands::delete_absence,

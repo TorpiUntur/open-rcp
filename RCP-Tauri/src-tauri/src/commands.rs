@@ -673,6 +673,78 @@ pub fn set_daily_target_seconds(
     Ok(format!("Zapisano nową normę czasową (obowiązuje od {})", today))
 }
 
+// ==========================================
+// Limit urlopu (redesign etap 5a)
+// Klucze w `settings`:
+//   vacation_days_per_year      – roczny limit urlopu wypoczynkowego (0 = nie ustawiono)
+//   vacation_carryover_<RRRR>   – zaległy urlop przeniesiony na dany rok
+// ==========================================
+#[derive(Serialize)]
+pub struct VacationSettings {
+    pub year: i32,
+    pub days_per_year: i64,
+    pub carryover_days: i64,
+}
+
+/// Odczyt liczbowego ustawienia z tabeli `settings` (brak / błędna wartość → `default`).
+fn read_setting_i64(db: &rusqlite::Connection, key: &str, default: i64) -> i64 {
+    db.query_row(
+        "SELECT value FROM settings WHERE key = ?",
+        [key],
+        |r| r.get::<_, String>(0),
+    )
+    .ok()
+    .and_then(|v| v.trim().parse::<i64>().ok())
+    .unwrap_or(default)
+}
+
+#[tauri::command]
+pub fn get_vacation_settings(
+    year: i32,
+    state: tauri::State<AppState>,
+) -> Result<VacationSettings, String> {
+    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+    let days_per_year = read_setting_i64(&db, "vacation_days_per_year", 0);
+    let carryover_days = read_setting_i64(&db, &format!("vacation_carryover_{}", year), 0);
+    Ok(VacationSettings {
+        year,
+        days_per_year,
+        carryover_days,
+    })
+}
+
+#[tauri::command]
+pub fn set_vacation_settings(
+    year: i32,
+    days_per_year: i64,
+    carryover_days: i64,
+    state: tauri::State<AppState>,
+) -> Result<String, String> {
+    if !(0..=366).contains(&days_per_year) || !(0..=366).contains(&carryover_days) {
+        return Err("Liczba dni musi mieścić się w przedziale 0–366".into());
+    }
+    if !(2000..=2100).contains(&year) {
+        return Err("Nieprawidłowy rok".into());
+    }
+
+    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+    db.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('vacation_days_per_year', ?)",
+        [days_per_year.to_string()],
+    )
+    .map_err(|e| format!("Błąd zapisu limitu urlopu: {}", e))?;
+    db.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+        params![format!("vacation_carryover_{}", year), carryover_days.to_string()],
+    )
+    .map_err(|e| format!("Błąd zapisu zaległego urlopu: {}", e))?;
+
+    Ok(format!(
+        "Zapisano: limit {} dni rocznie, zaległy urlop na {}: {} dni",
+        days_per_year, year, carryover_days
+    ))
+}
+
 /// Historia normy dziennej: (obowiązuje_od, sekundy), rosnąco po dacie.
 fn load_target_history(db: &rusqlite::Connection) -> Vec<(String, i64)> {
     let mut stmt = match db.prepare(
