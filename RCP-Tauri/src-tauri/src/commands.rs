@@ -1,6 +1,7 @@
 use crate::AppState;
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
+use tauri::Manager; // app.path() – folder danych aplikacji (kopie zapasowe)
 
 #[derive(Serialize)]
 pub struct User {
@@ -671,6 +672,177 @@ pub fn set_daily_target_seconds(
     .map_err(|e| format!("Błąd zapisu historii normy: {}", e))?;
 
     Ok(format!("Zapisano nową normę czasową (obowiązuje od {})", today))
+}
+
+// ==========================================
+// Limit urlopu (redesign etap 5a)
+// Klucze w `settings`:
+//   vacation_days_per_year      – roczny limit urlopu wypoczynkowego (0 = nie ustawiono)
+//   vacation_carryover_<RRRR>   – zaległy urlop przeniesiony na dany rok
+// ==========================================
+#[derive(Serialize)]
+pub struct VacationSettings {
+    pub year: i32,
+    pub days_per_year: i64,
+    pub carryover_days: i64,
+}
+
+/// Odczyt liczbowego ustawienia z tabeli `settings` (brak / błędna wartość → `default`).
+fn read_setting_i64(db: &rusqlite::Connection, key: &str, default: i64) -> i64 {
+    db.query_row(
+        "SELECT value FROM settings WHERE key = ?",
+        [key],
+        |r| r.get::<_, String>(0),
+    )
+    .ok()
+    .and_then(|v| v.trim().parse::<i64>().ok())
+    .unwrap_or(default)
+}
+
+#[tauri::command]
+pub fn get_vacation_settings(
+    year: i32,
+    state: tauri::State<AppState>,
+) -> Result<VacationSettings, String> {
+    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+    let days_per_year = read_setting_i64(&db, "vacation_days_per_year", 0);
+    let carryover_days = read_setting_i64(&db, &format!("vacation_carryover_{}", year), 0);
+    Ok(VacationSettings {
+        year,
+        days_per_year,
+        carryover_days,
+    })
+}
+
+#[tauri::command]
+pub fn set_vacation_settings(
+    year: i32,
+    days_per_year: i64,
+    carryover_days: i64,
+    state: tauri::State<AppState>,
+) -> Result<String, String> {
+    if !(0..=366).contains(&days_per_year) || !(0..=366).contains(&carryover_days) {
+        return Err("Liczba dni musi mieścić się w przedziale 0–366".into());
+    }
+    if !(2000..=2100).contains(&year) {
+        return Err("Nieprawidłowy rok".into());
+    }
+
+    let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+    db.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('vacation_days_per_year', ?)",
+        [days_per_year.to_string()],
+    )
+    .map_err(|e| format!("Błąd zapisu limitu urlopu: {}", e))?;
+    db.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+        params![format!("vacation_carryover_{}", year), carryover_days.to_string()],
+    )
+    .map_err(|e| format!("Błąd zapisu zaległego urlopu: {}", e))?;
+
+    Ok(format!(
+        "Zapisano: limit {} dni rocznie, zaległy urlop na {}: {} dni",
+        days_per_year, year, carryover_days
+    ))
+}
+
+// ==========================================
+// Kopia zapasowa bazy (redesign etap 5b)
+// Kopie trafiają do <folder danych aplikacji>\backups\data_RRRR-MM-DD_GGMMSS.db
+// (%APPDATA%\com.rcp.timetracker\backups). `VACUUM INTO` daje spójną kopię
+// także przy otwartym połączeniu (zwykłe kopiowanie pliku mogłoby złapać zapis w połowie).
+// ==========================================
+#[derive(Serialize)]
+pub struct BackupInfo {
+    pub file_name: String,
+    pub path: String,
+    pub size_bytes: u64,
+    pub modified: String, // "RRRR-MM-DD GG:MM" (czas lokalny)
+}
+
+fn backups_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Brak folderu danych aplikacji: {}", e))?
+        .join("backups");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Nie można utworzyć folderu kopii: {}", e))?;
+    Ok(dir)
+}
+
+fn backup_info(path: &std::path::Path) -> Option<BackupInfo> {
+    let meta = std::fs::metadata(path).ok()?;
+    let modified = meta
+        .modified()
+        .ok()
+        .map(|t| {
+            let dt: chrono::DateTime<chrono::Local> = t.into();
+            dt.format("%Y-%m-%d %H:%M").to_string()
+        })
+        .unwrap_or_default();
+    Some(BackupInfo {
+        file_name: path.file_name()?.to_string_lossy().to_string(),
+        path: path.to_string_lossy().to_string(),
+        size_bytes: meta.len(),
+        modified,
+    })
+}
+
+#[tauri::command]
+pub fn backup_database(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<BackupInfo, String> {
+    let dir = backups_dir(&app)?;
+    let stamp = chrono::Local::now().format("%Y-%m-%d_%H%M%S").to_string();
+    let target = dir.join(format!("data_{}.db", stamp));
+    if target.exists() {
+        return Err("Kopia o tej nazwie już istnieje – spróbuj ponownie za sekundę".into());
+    }
+    let target_str: String = target.to_string_lossy().to_string();
+
+    {
+        let db = state.db.lock().map_err(|_| "Błąd bazy")?;
+        db.execute("VACUUM INTO ?1", [&target_str])
+            .map_err(|e| format!("Błąd tworzenia kopii: {}", e))?;
+    }
+
+    backup_info(&target).ok_or_else(|| "Kopia utworzona, ale nie można odczytać pliku".to_string())
+}
+
+#[tauri::command]
+pub fn list_backups(app: tauri::AppHandle) -> Result<Vec<BackupInfo>, String> {
+    let dir = backups_dir(&app)?;
+    let entries = std::fs::read_dir(&dir).map_err(|e| format!("Błąd odczytu folderu kopii: {}", e))?;
+    let mut list: Vec<BackupInfo> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("db"))
+        .filter_map(|p| backup_info(&p))
+        .collect();
+    // Nazwy zawierają datę i godzinę → sortowanie po nazwie = od najnowszej
+    list.sort_by(|a, b| b.file_name.cmp(&a.file_name));
+    Ok(list)
+}
+
+#[tauri::command]
+pub fn open_backups_folder(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = backups_dir(&app)?;
+    open_in_file_manager(&dir)
+}
+
+#[cfg(target_os = "windows")]
+fn open_in_file_manager(dir: &std::path::Path) -> Result<(), String> {
+    std::process::Command::new("explorer")
+        .arg(dir)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Nie można otworzyć folderu: {}", e))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn open_in_file_manager(_dir: &std::path::Path) -> Result<(), String> {
+    Err("Otwieranie folderu jest obsługiwane tylko w Windows".into())
 }
 
 /// Historia normy dziennej: (obowiązuje_od, sekundy), rosnąco po dacie.
